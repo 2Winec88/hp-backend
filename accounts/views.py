@@ -1,22 +1,92 @@
-from django.contrib.auth import get_user_model
-from rest_framework import status
+from rest_framework import status, generics, permissions
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import login, get_user_model
 
-from .serializers import RegistrationSerializer
+from .serializers import (
+    UserLoginSerializer,
+    UserProfileSerializer,
+    UserUpdateSerializer,
+    UserRegistrationSerializer,
+    UserChangePasswordSerializer
+)
 
 
-class RegistrationView(APIView):
-    def post(self, request, *args, **kwargs):
-        serializer = RegistrationSerializer(data=request.data)
+User = get_user_model
+
+class RegistrationView(generics.CreateAPIView):
+    queryset = User.objects.all()
+    serializer_class = UserRegistrationSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(request.data)
         serializer.is_valid(raise_exception=True)
-        user = get_user_model().objects.create_user(**serializer.validated_data)
+        user = serializer.save()
+        
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'user': UserProfileSerializer(user).data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'message': 'User registered successfully'
+        }, status=status.HTTP_201_CREATED)
 
-        return Response(
-            {
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+class LoginView(generics.GenericAPIView):
+    serializer_class = UserLoginSerializer
+    permission_classes = [permissions.AllowAny]
+    
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        
+        login(request, user)
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'user': UserProfileSerializer(user).data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'message': 'User login successfully'
+        }, status=status.HTTP_200_OK)
+
+class ProfileView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_object(self):
+        return self.request.user
+    
+    def get_serializer_class(self):
+        if self.request.method == 'PUT' or self.request.method == 'PATCH':
+            return UserUpdateSerializer
+        return UserProfileSerializer
+    
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        
+        return Response({
+            'message': 'Password changed succesfully'
+        }, status.HTTP_200_OK)
+    
+@api_view(['POST'])
+@permission_classes([permissions.isAuthenticated])
+def logout_view(request):
+    """Выход пользователя"""
+    try:
+        refresh_token = request.data.get('refresh_token')
+        if refresh_token:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        return Response({
+            'message':'logout succesful'
+        }, status=status.HTTP_200_OK)
+    except Exception:
+        return Response({
+            'error':'invalid token'
+        }, status=status.HTTP_400_BAD_REQUEST)

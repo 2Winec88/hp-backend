@@ -40,7 +40,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             return instance    
 
 
-class ChangePasswordSerializer(serializers.Serializer):
+class UserChangePasswordSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True, trim_whitespace=False)
     new_password = serializers.CharField(
         write_only=True,
@@ -68,7 +68,7 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.save(update_fields=["password"])
         return user    
     
-class RegistrationSerializer(serializers.ModelSerializer):
+class UserRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
 
     password_confirm = serializers.CharField(write_only=True)
