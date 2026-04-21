@@ -28,16 +28,10 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = get_user_model
+        model = get_user_model()
         fields = (
             'first_name', 'last_name', 'avatar', 'bio'
         )
-        
-        def update(self, instance, validatted_data):
-            for attr, value in validatted_data.items():
-                setattr(instance, attr, value)
-            instance.save()
-            return instance    
 
 
 class UserChangePasswordSerializer(serializers.Serializer):
@@ -70,15 +64,26 @@ class UserChangePasswordSerializer(serializers.Serializer):
     
 class UserRegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
-
     password_confirm = serializers.CharField(write_only=True)
     
     class Meta:
         model = get_user_model()
         fields = ("username", "email", "password", "password_confirm","first_name","last_name")
-    
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError(
+                {"password_confirm": "Passwords do not match."}
+            )
+        return attrs
+
     def create(self, validated_data):
-        return super().create(validated_data)
+        validated_data.pop("password_confirm", None)
+        password = validated_data.pop("password")
+        user = self.Meta.model(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
 
 class UserLoginSerializer(serializers.Serializer):
     """Сериализатор для входа пользователя"""

@@ -13,7 +13,7 @@ from .serializers import (
 )
 
 
-User = get_user_model
+User = get_user_model()
 
 class RegistrationView(generics.CreateAPIView):
     queryset = User.objects.all()
@@ -21,7 +21,7 @@ class RegistrationView(generics.CreateAPIView):
     permission_classes = [permissions.AllowAny]
     
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(request.data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         
@@ -66,16 +66,17 @@ class ProfileView(generics.RetrieveUpdateAPIView):
         return UserProfileSerializer
     
     def update(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         
         return Response({
-            'message': 'Password changed succesfully'
-        }, status.HTTP_200_OK)
+            'message': 'Profile updated successfully',
+            'user': UserProfileSerializer(self.get_object()).data,
+        }, status=status.HTTP_200_OK)
     
 @api_view(['POST'])
-@permission_classes([permissions.isAuthenticated])
+@permission_classes([permissions.IsAuthenticated])
 def logout_view(request):
     """Выход пользователя"""
     try:
