@@ -1,8 +1,12 @@
+from django.contrib.auth import login, get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import login, get_user_model
 
 from .serializers import (
     UserLoginSerializer,
@@ -11,6 +15,7 @@ from .serializers import (
     UserRegistrationSerializer,
     UserChangePasswordSerializer
 )
+from .utils import send_verification_email
 
 
 User = get_user_model()
@@ -24,15 +29,42 @@ class RegistrationView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        
-        refresh = RefreshToken.for_user(user)
+        send_verification_email(request, user)
         
         return Response({
             'user': UserProfileSerializer(user).data,
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'message': 'User registered successfully'
+            'message': 'User registered successfully. Please verify your email before logging in.'
         }, status=status.HTTP_201_CREATED)
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, uidb64, token, *args, **kwargs):
+        try:
+            user_id = force_str(urlsafe_base64_decode(uidb64))
+            user = User.objects.get(pk=user_id)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            return Response(
+                {'detail': 'Invalid verification link.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not default_token_generator.check_token(user, token):
+            return Response(
+                {'detail': 'Invalid or expired verification token.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not user.is_email_verified:
+            user.is_email_verified = True
+            user.is_active = True
+            user.save(update_fields=['is_email_verified', 'is_active'])
+
+        return Response(
+            {'message': 'Email verified successfully. You can now log in.'},
+            status=status.HTTP_200_OK,
+        )
 
 class LoginView(generics.GenericAPIView):
     serializer_class = UserLoginSerializer

@@ -3,9 +3,18 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 
+from .models import Role
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Role
+        fields = ("id", "name", "code", "description")
+
 
 class UserProfileSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
+    roles = RoleSerializer(many=True, read_only=True)
 
     class Meta:
         model = get_user_model()
@@ -18,10 +27,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "full_name",
             "avatar",
             "bio",
-            "is_courier",
-            "is_moderator",
+            "roles",
         )
-        read_only_fields = ("id", "full_name", "is_courier", "is_moderator", "date_joined")
+        read_only_fields = ("id", "full_name", "roles", "date_joined")
 
         def get_organization(self, obj):
             return obj.organization.name
@@ -82,6 +90,8 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         password = validated_data.pop("password")
         user = self.Meta.model(**validated_data)
         user.set_password(password)
+        user.is_active = False
+        user.is_email_verified = False
         user.save()
         return user
 
@@ -95,10 +105,21 @@ class UserLoginSerializer(serializers.Serializer):
         email = attrs.get("email")
         password = attrs.get("password")
 
-        user = authenticate(username=email, password=password)
-        if not user:
+        user_model = get_user_model()
+
+        try:
+            user = user_model.objects.get(email=email)
+        except user_model.DoesNotExist:
+            user = None
+
+        if not user or not user.check_password(password):
             raise serializers.ValidationError(
                 "Invalid email or password."
+            )
+
+        if not user.is_email_verified:
+            raise serializers.ValidationError(
+                "Email address is not verified."
             )
 
         if not user.is_active:
@@ -106,5 +127,11 @@ class UserLoginSerializer(serializers.Serializer):
                 "User account is disabled."
             )
 
-        attrs["user"] = user
+        authenticated_user = authenticate(username=email, password=password)
+        if not authenticated_user:
+            raise serializers.ValidationError(
+                "Invalid email or password."
+            )
+
+        attrs["user"] = authenticated_user
         return attrs
