@@ -13,7 +13,7 @@ class RoleSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    full_name = serializers.ReadOnlyField()
+    full_name = serializers.CharField(read_only=True)
     roles = RoleSerializer(many=True, read_only=True)
 
     class Meta:

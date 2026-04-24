@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Organization, OrganizationMember, OrganizationRegistrationRequest
+from .models import Event, Organization, OrganizationMember, OrganizationRegistrationRequest
 
 
 class OrganizationMemberInline(admin.TabularInline):
@@ -37,6 +37,15 @@ class OrganizationMemberAdmin(admin.ModelAdmin):
     list_filter = ("role", "created_at")
     search_fields = ("organization__official_name", "user__email", "user__username")
     autocomplete_fields = ("organization", "user")
+
+
+@admin.register(Event)
+class EventAdmin(admin.ModelAdmin):
+    list_display = ("title", "organization", "category", "status", "starts_at", "is_online")
+    list_filter = ("status", "category", "is_online", "starts_at")
+    search_fields = ("title", "content", "organization__official_name")
+    autocomplete_fields = ("category", "organization", "created_by_member")
+    prepopulated_fields = {"slug": ("title",)}
 
 
 @admin.register(OrganizationRegistrationRequest)

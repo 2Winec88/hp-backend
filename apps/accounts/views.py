@@ -2,7 +2,8 @@ from django.contrib.auth import login, get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
-from rest_framework import status, generics, permissions
+from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, inline_serializer
+from rest_framework import status, generics, permissions, serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -40,6 +41,22 @@ class RegistrationView(generics.CreateAPIView):
 class VerifyEmailView(APIView):
     permission_classes = [permissions.AllowAny]
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("uidb64", OpenApiTypes.STR, OpenApiParameter.PATH),
+            OpenApiParameter("token", OpenApiTypes.STR, OpenApiParameter.PATH),
+        ],
+        responses={
+            200: inline_serializer(
+                name="VerifyEmailSuccessResponse",
+                fields={"message": serializers.CharField()},
+            ),
+            400: inline_serializer(
+                name="VerifyEmailErrorResponse",
+                fields={"detail": serializers.CharField()},
+            ),
+        },
+    )
     def get(self, request, uidb64, token, *args, **kwargs):
         try:
             user_id = force_str(urlsafe_base64_decode(uidb64))
@@ -107,6 +124,22 @@ class ProfileView(generics.RetrieveUpdateAPIView):
             'user': UserProfileSerializer(self.get_object()).data,
         }, status=status.HTTP_200_OK)
     
+@extend_schema(
+    request=inline_serializer(
+        name="LogoutRequest",
+        fields={"refresh_token": serializers.CharField(required=False)},
+    ),
+    responses={
+        200: inline_serializer(
+            name="LogoutSuccessResponse",
+            fields={"message": serializers.CharField()},
+        ),
+        400: inline_serializer(
+            name="LogoutErrorResponse",
+            fields={"error": serializers.CharField()},
+        ),
+    },
+)
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def logout_view(request):

@@ -1,15 +1,162 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import Role, UserRole
+from apps.core.models import Category
 
-from .models import Organization, OrganizationMember, OrganizationRegistrationRequest
+from .models import (
+    Event,
+    Organization,
+    OrganizationCommonFieldsMixin,
+    OrganizationMember,
+    OrganizationRegistrationRequest,
+)
 
 
 def create_test_file(name):
     return SimpleUploadedFile(name, b"file-content", content_type="application/pdf")
+
+
+class OrganizationModelStructureTests(SimpleTestCase):
+    def test_organization_models_share_common_fields_mixin(self):
+        self.assertTrue(OrganizationCommonFieldsMixin._meta.abstract)
+        self.assertTrue(issubclass(Organization, OrganizationCommonFieldsMixin))
+        self.assertTrue(issubclass(OrganizationRegistrationRequest, OrganizationCommonFieldsMixin))
+
+        common_fields = {
+            "official_name",
+            "legal_address",
+            "phone",
+            "email",
+            "executive_person_full_name",
+            "executive_authority_basis",
+            "executive_body_name",
+            "charter_document",
+            "inn_certificate",
+            "state_registration_certificate",
+            "founders_appointment_decision",
+            "executive_passport_copy",
+            "egrul_extract",
+            "nko_registry_notice",
+            "created_at",
+            "updated_at",
+        }
+        self.assertLessEqual(common_fields, {field.name for field in Organization._meta.fields})
+        self.assertLessEqual(
+            common_fields,
+            {field.name for field in OrganizationRegistrationRequest._meta.fields},
+        )
+
+
+class EventModelTests(APITestCase):
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.user = self.user_model.objects.create_user(
+            username="event-author",
+            email="event-author@example.com",
+            password="StrongPassword123!",
+        )
+        self.organization = Organization.objects.create(
+            created_by=self.user,
+            official_name="Event Org",
+            legal_address="Address",
+            phone="+7 777 000 00 00",
+            email="org@example.com",
+            executive_person_full_name="Executive Person",
+            executive_authority_basis="Charter",
+            executive_body_name="Board",
+            charter_document="charter.pdf",
+            inn_certificate="inn.pdf",
+            state_registration_certificate="registration.pdf",
+            founders_appointment_decision="founders.pdf",
+            executive_passport_copy="passport.pdf",
+            egrul_extract="egrul.pdf",
+            nko_registry_notice="registry.pdf",
+        )
+        self.member = OrganizationMember.objects.create(
+            organization=self.organization,
+            user=self.user,
+            role=OrganizationMember.Role.MANAGER,
+        )
+        self.event_category = Category.objects.create(
+            name="Спорт",
+            scope=Category.Scope.EVENT,
+        )
+
+    def test_event_generates_slug_from_title(self):
+        event = Event.objects.create(
+            title="Полумарафон Оренбург-2026",
+            content="Описание мероприятия",
+            category=self.event_category,
+            organization=self.organization,
+            created_by_member=self.member,
+            starts_at=timezone.now(),
+        )
+
+        self.assertEqual(event.slug, "полумарафон-оренбург-2026")
+        self.assertEqual(str(event), "Полумарафон Оренбург-2026")
+
+    def test_event_rejects_non_event_category(self):
+        fundraising_category = Category.objects.create(
+            name="Сборы спорт",
+            scope=Category.Scope.FUNDRAISING,
+        )
+        event = Event(
+            title="Полумарафон",
+            content="Описание мероприятия",
+            category=fundraising_category,
+            organization=self.organization,
+            created_by_member=self.member,
+            starts_at=timezone.now(),
+        )
+
+        with self.assertRaises(ValidationError):
+            event.full_clean()
+
+    def test_event_rejects_member_from_another_organization(self):
+        other_user = self.user_model.objects.create_user(
+            username="other",
+            email="other@example.com",
+            password="StrongPassword123!",
+        )
+        other_organization = Organization.objects.create(
+            created_by=other_user,
+            official_name="Other Org",
+            legal_address="Other Address",
+            phone="+7 777 000 00 01",
+            email="other-org@example.com",
+            executive_person_full_name="Other Executive",
+            executive_authority_basis="Charter",
+            executive_body_name="Board",
+            charter_document="charter.pdf",
+            inn_certificate="inn.pdf",
+            state_registration_certificate="registration.pdf",
+            founders_appointment_decision="founders.pdf",
+            executive_passport_copy="passport.pdf",
+            egrul_extract="egrul.pdf",
+            nko_registry_notice="registry.pdf",
+        )
+        other_member = OrganizationMember.objects.create(
+            organization=other_organization,
+            user=other_user,
+            role=OrganizationMember.Role.MANAGER,
+        )
+        event = Event(
+            title="Полумарафон",
+            content="Описание мероприятия",
+            category=self.event_category,
+            organization=self.organization,
+            created_by_member=other_member,
+            starts_at=timezone.now(),
+        )
+
+        with self.assertRaises(ValidationError):
+            event.full_clean()
 
 
 class OrganizationRegistrationRequestApiTests(APITestCase):
