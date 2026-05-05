@@ -1,22 +1,25 @@
+from datetime import timedelta
+
 from django.contrib.auth import login, get_user_model
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.encoding import force_str
-from django.utils.http import urlsafe_base64_decode
-from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema, inline_serializer
+from django.db import transaction
+from django.utils import timezone
+from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import status, generics, permissions, serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from .models import EmailVerificationCode
 from .serializers import (
     UserLoginSerializer,
     UserProfileSerializer,
     UserUpdateSerializer,
     UserRegistrationSerializer,
-    UserChangePasswordSerializer
+    UserChangePasswordSerializer,
+    VerifyEmailCodeSerializer,
 )
-from .utils import send_verification_email
+from .tasks import send_email_verification_code
 
 
 User = get_user_model()
@@ -30,22 +33,27 @@ class RegistrationView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        send_verification_email(request, user)
+        verification_code = EmailVerificationCode.objects.create(
+            user=user,
+            code=EmailVerificationCode.generate_code(),
+            expires_at=timezone.now() + timedelta(minutes=15),
+        )
+        transaction.on_commit(
+            lambda: send_email_verification_code.delay(user.pk, verification_code.code)
+        )
         
         return Response({
             'user': UserProfileSerializer(user).data,
-            'message': 'User registered successfully. Please verify your email before logging in.'
+            'message': 'User registered successfully. Please verify your email with the code from the email before logging in.'
         }, status=status.HTTP_201_CREATED)
 
 
 class VerifyEmailView(APIView):
     permission_classes = [permissions.AllowAny]
+    serializer_class = VerifyEmailCodeSerializer
 
     @extend_schema(
-        parameters=[
-            OpenApiParameter("uidb64", OpenApiTypes.STR, OpenApiParameter.PATH),
-            OpenApiParameter("token", OpenApiTypes.STR, OpenApiParameter.PATH),
-        ],
+        request=VerifyEmailCodeSerializer,
         responses={
             200: inline_serializer(
                 name="VerifyEmailSuccessResponse",
@@ -57,26 +65,10 @@ class VerifyEmailView(APIView):
             ),
         },
     )
-    def get(self, request, uidb64, token, *args, **kwargs):
-        try:
-            user_id = force_str(urlsafe_base64_decode(uidb64))
-            user = User.objects.get(pk=user_id)
-        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            return Response(
-                {'detail': 'Invalid verification link.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not default_token_generator.check_token(user, token):
-            return Response(
-                {'detail': 'Invalid or expired verification token.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if not user.is_email_verified:
-            user.is_email_verified = True
-            user.is_active = True
-            user.save(update_fields=['is_email_verified', 'is_active'])
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
 
         return Response(
             {'message': 'Email verified successfully. You can now log in.'},

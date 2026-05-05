@@ -3,8 +3,6 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
 
-from apps.core.models import Category
-
 def organization_document_upload_to(instance, filename):
     return f"organizations/{instance.pk or 'new'}/{filename}"
 
@@ -16,6 +14,52 @@ def organization_common_document_upload_to(instance, filename):
     if instance._meta.model_name == "organizationregistrationrequest":
         return organization_request_document_upload_to(instance, filename)
     return organization_document_upload_to(instance, filename)
+
+
+class Category(models.Model):
+    class Scope(models.TextChoices):
+        EVENT = "event", "РњРµСЂРѕРїСЂРёСЏС‚РёСЏ"
+        FUNDRAISING = "fundraising", "РЎР±РѕСЂС‹"
+
+    name = models.CharField(max_length=100, verbose_name="РќР°Р·РІР°РЅРёРµ")
+    slug = models.SlugField(
+        max_length=100,
+        blank=True,
+        allow_unicode=True,
+        verbose_name="Slug",
+    )
+    scope = models.CharField(
+        max_length=20,
+        choices=Scope.choices,
+        verbose_name="РћР±Р»Р°СЃС‚СЊ",
+    )
+    description = models.TextField(blank=True, verbose_name="РћРїРёСЃР°РЅРёРµ")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="РЎРѕР·РґР°РЅРѕ")
+
+    class Meta:
+        db_table = "categories"
+        verbose_name = "РљР°С‚РµРіРѕСЂРёСЏ"
+        verbose_name_plural = "РљР°С‚РµРіРѕСЂРёРё"
+        ordering = ("name",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("scope", "name"),
+                name="unique_category_name_per_scope",
+            ),
+            models.UniqueConstraint(
+                fields=("scope", "slug"),
+                name="unique_category_slug_per_scope",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name, allow_unicode=True)
+        super().save(*args, **kwargs)
+
 
 class OrganizationCommonFieldsMixin(models.Model):
     # Основная информация
@@ -169,13 +213,13 @@ class Event(models.Model):
     )
     organization = models.ForeignKey(
         Organization,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="events",
         verbose_name="Организация",
     )
     created_by_member = models.ForeignKey(
         OrganizationMember,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="created_events",
         verbose_name="Создатель",
     )

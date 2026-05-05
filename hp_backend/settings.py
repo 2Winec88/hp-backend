@@ -58,7 +58,6 @@ THIRD_PARTY_APPS = [
 ]
 
 LOCAL_APPS = [
-    'apps.core.apps.CoreConfig',
     'apps.accounts.apps.AccountsConfig',
     'apps.collections.apps.CollectionsConfig',
     'apps.organizations.apps.OrganizationsConfig',
@@ -196,6 +195,15 @@ DEFAULT_FROM_EMAIL = config(
     'DEFAULT_FROM_EMAIL',
     default='noreply@example.com',
 )
+
+REDIS_URL = config('REDIS_URL', default='redis://127.0.0.1:6379/0')
+
+CELERY_BROKER_URL = config('CELERY_BROKER_URL', default=REDIS_URL)
+CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default=REDIS_URL)
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/

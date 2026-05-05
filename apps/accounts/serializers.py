@@ -2,8 +2,9 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
 
-from .models import Role
+from .models import EmailVerificationCode, Role
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -93,6 +94,53 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         user.is_active = False
         user.is_email_verified = False
         user.save()
+        return user
+
+
+class VerifyEmailCodeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+
+    def validate(self, attrs):
+        user_model = get_user_model()
+
+        try:
+            user = user_model.objects.get(email=attrs["email"])
+        except user_model.DoesNotExist:
+            raise serializers.ValidationError({"email": "User with this email does not exist."})
+
+        verification_code = (
+            EmailVerificationCode.objects.filter(
+                user=user,
+                code=attrs["code"],
+                used_at__isnull=True,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+
+        if verification_code is None:
+            raise serializers.ValidationError({"code": "Invalid verification code."})
+
+        if verification_code.is_expired:
+            raise serializers.ValidationError({"code": "Verification code has expired."})
+
+        attrs["user"] = user
+        attrs["verification_code"] = verification_code
+        return attrs
+
+    def save(self, **kwargs):
+        user = self.validated_data["user"]
+        verification_code = self.validated_data["verification_code"]
+
+        verification_code.used_at = timezone.now()
+        verification_code.save(update_fields=["used_at"])
+
+        if not user.is_email_verified:
+            user.is_email_verified = True
+            user.is_active = True
+            user.save(update_fields=["is_email_verified", "is_active"])
+
         return user
 
 class UserLoginSerializer(serializers.Serializer):

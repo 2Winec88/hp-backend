@@ -7,9 +7,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import Role, UserRole
-from apps.core.models import Category
 
 from .models import (
+    Category,
     Event,
     Organization,
     OrganizationCommonFieldsMixin,

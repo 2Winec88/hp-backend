@@ -13,6 +13,52 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
+            name="Category",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=100, verbose_name="РќР°Р·РІР°РЅРёРµ")),
+                (
+                    "slug",
+                    models.SlugField(
+                        allow_unicode=True,
+                        blank=True,
+                        max_length=100,
+                        verbose_name="Slug",
+                    ),
+                ),
+                (
+                    "scope",
+                    models.CharField(
+                        choices=[
+                            ("event", "РњРµСЂРѕРїСЂРёСЏС‚РёСЏ"),
+                            ("fundraising", "РЎР±РѕСЂС‹"),
+                        ],
+                        max_length=20,
+                        verbose_name="РћР±Р»Р°СЃС‚СЊ",
+                    ),
+                ),
+                ("description", models.TextField(blank=True, verbose_name="РћРїРёСЃР°РЅРёРµ")),
+                (
+                    "created_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name="РЎРѕР·РґР°РЅРѕ"),
+                ),
+            ],
+            options={
+                "verbose_name": "РљР°С‚РµРіРѕСЂРёСЏ",
+                "verbose_name_plural": "РљР°С‚РµРіРѕСЂРёРё",
+                "db_table": "categories",
+                "ordering": ("name",),
+            },
+        ),
+        migrations.CreateModel(
             name="Organization",
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
@@ -111,5 +157,13 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="organizationmember",
             constraint=models.UniqueConstraint(fields=("organization", "user"), name="unique_organization_member"),
+        ),
+        migrations.AddConstraint(
+            model_name="category",
+            constraint=models.UniqueConstraint(fields=("scope", "name"), name="unique_category_name_per_scope"),
+        ),
+        migrations.AddConstraint(
+            model_name="category",
+            constraint=models.UniqueConstraint(fields=("scope", "slug"), name="unique_category_slug_per_scope"),
         ),
     ]

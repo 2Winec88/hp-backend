@@ -4,7 +4,6 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("core", "0002_category_scope"),
         ("organizations", "0003_update_common_document_upload_to"),
     ]
 
@@ -87,14 +86,14 @@ class Migration(migrations.Migration):
                         limit_choices_to={"scope": "event"},
                         on_delete=django.db.models.deletion.PROTECT,
                         related_name="events",
-                        to="core.category",
+                        to="organizations.category",
                         verbose_name="Категория",
                     ),
                 ),
                 (
                     "created_by_member",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT,
+                        on_delete=django.db.models.deletion.CASCADE,
                         related_name="created_events",
                         to="organizations.organizationmember",
                         verbose_name="Создатель",
@@ -103,7 +102,7 @@ class Migration(migrations.Migration):
                 (
                     "organization",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
+                        on_delete=django.db.models.deletion.PROTECT,
                         related_name="events",
                         to="organizations.organization",
                         verbose_name="Организация",
