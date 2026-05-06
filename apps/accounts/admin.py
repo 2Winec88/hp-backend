@@ -1,27 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import EmailVerificationCode, Role, User, UserRole
-
-
-class UserRoleInline(admin.TabularInline):
-    model = UserRole
-    extra = 1
-    autocomplete_fields = ("role",)
-
-
-@admin.register(Role)
-class RoleAdmin(admin.ModelAdmin):
-    list_display = ("name", "code", "created_at")
-    search_fields = ("name", "code", "description")
-
-
-@admin.register(UserRole)
-class UserRoleAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "created_at")
-    list_filter = ("role",)
-    search_fields = ("user__email", "user__username", "role__name", "role__code")
-    autocomplete_fields = ("user", "role")
+from .models import EmailVerificationCode, User
 
 
 @admin.register(EmailVerificationCode)
@@ -36,7 +16,6 @@ class EmailVerificationCodeAdmin(admin.ModelAdmin):
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
     ordering = ("email",)
-    inlines = (UserRoleInline,)
     list_display = (
         "email",
         "username",

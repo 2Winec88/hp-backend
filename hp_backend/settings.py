@@ -136,9 +136,9 @@ AUTH_USER_MODEL = 'accounts.User'
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'ru-ru'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Yekaterinburg'
 
 USE_I18N = True
 
@@ -209,3 +209,7 @@ CELERY_TIMEZONE = TIME_ZONE
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = config('STATIC_ROOT', default='/vol/static')
+
+MEDIA_URL = 'media/'
+MEDIA_ROOT = config('MEDIA_ROOT', default='/vol/media')

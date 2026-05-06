@@ -1,9 +1,11 @@
 from rest_framework.routers import DefaultRouter
 
-from .views import OrganizationRegistrationRequestViewSet
+from .views import EventNewsViewSet, EventViewSet, OrganizationRegistrationRequestViewSet
 
 
 router = DefaultRouter()
+router.register("events", EventViewSet, basename="event")
+router.register("event-news", EventNewsViewSet, basename="event-news")
 router.register(
     "organization-registration-requests",
     OrganizationRegistrationRequestViewSet,

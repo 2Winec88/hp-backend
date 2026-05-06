@@ -4,18 +4,11 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 
-from .models import EmailVerificationCode, Role
-
-
-class RoleSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Role
-        fields = ("id", "name", "code", "description")
+from .models import EmailVerificationCode
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
-    roles = RoleSerializer(many=True, read_only=True)
 
     class Meta:
         model = get_user_model()
@@ -28,9 +21,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "full_name",
             "avatar",
             "bio",
-            "roles",
         )
-        read_only_fields = ("id", "full_name", "roles", "date_joined")
+        read_only_fields = ("id", "full_name", "date_joined")
 
         def get_organization(self, obj):
             return obj.organization.name

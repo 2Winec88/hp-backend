@@ -17,6 +17,12 @@ __pycache__/
 db.sqlite3
 db.sqlite3-journal
 
+# Django generated files
+media/
+staticfiles/
+static/
+logs/
+
 # Test and tooling caches
 .pytest_cache/
 .mypy_cache/
@@ -40,3 +46,10 @@ Thumbs.db
 
 # Docker and local data
 postgres_data/
+redis_data/
+static_data/
+media_data/
+
+# Celery runtime files
+celerybeat-schedule
+celerybeat.pid

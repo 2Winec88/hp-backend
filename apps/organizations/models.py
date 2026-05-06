@@ -10,6 +10,14 @@ def organization_request_document_upload_to(instance, filename):
     return f"organization-registration-requests/{instance.pk or 'new'}/{filename}"
 
 
+def event_image_upload_to(instance, filename):
+    return f"events/{instance.event_id or 'new'}/images/{filename}"
+
+
+def event_news_image_upload_to(instance, filename):
+    return f"events/{instance.event_id or 'new'}/news/{filename}"
+
+
 def organization_common_document_upload_to(instance, filename):
     if instance._meta.model_name == "organizationregistrationrequest":
         return organization_request_document_upload_to(instance, filename)
@@ -18,10 +26,10 @@ def organization_common_document_upload_to(instance, filename):
 
 class Category(models.Model):
     class Scope(models.TextChoices):
-        EVENT = "event", "РњРµСЂРѕРїСЂРёСЏС‚РёСЏ"
-        FUNDRAISING = "fundraising", "РЎР±РѕСЂС‹"
+        EVENT = "event", "Мероприятия"
+        FUNDRAISING = "fundraising", "Сборы"
 
-    name = models.CharField(max_length=100, verbose_name="РќР°Р·РІР°РЅРёРµ")
+    name = models.CharField(max_length=100, verbose_name="Название")
     slug = models.SlugField(
         max_length=100,
         blank=True,
@@ -31,15 +39,15 @@ class Category(models.Model):
     scope = models.CharField(
         max_length=20,
         choices=Scope.choices,
-        verbose_name="РћР±Р»Р°СЃС‚СЊ",
+        verbose_name="Область",
     )
-    description = models.TextField(blank=True, verbose_name="РћРїРёСЃР°РЅРёРµ")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="РЎРѕР·РґР°РЅРѕ")
+    description = models.TextField(blank=True, verbose_name="Описание")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
 
     class Meta:
         db_table = "categories"
-        verbose_name = "РљР°С‚РµРіРѕСЂРёСЏ"
-        verbose_name_plural = "РљР°С‚РµРіРѕСЂРёРё"
+        verbose_name = "Категория"
+        verbose_name_plural = "Категории"
         ordering = ("name",)
         constraints = [
             models.UniqueConstraint(
@@ -93,37 +101,43 @@ class OrganizationCommonFieldsMixin(models.Model):
         verbose_name="Наименование исполнительного органа",
     )
 
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
+class OrganizationDocumentFieldsMixin(models.Model):
     # Документы
     charter_document = models.FileField(
-        upload_to=organization_common_document_upload_to,
+        upload_to=organization_request_document_upload_to,
         verbose_name="Устав",
     )
     inn_certificate = models.FileField(
-        upload_to=organization_common_document_upload_to,
+        upload_to=organization_request_document_upload_to,
         verbose_name="Свидетельство о присвоении ИНН",
     )
     state_registration_certificate = models.FileField(
-        upload_to=organization_common_document_upload_to,
+        upload_to=organization_request_document_upload_to,
         verbose_name="Свидетельство о гос регистрации ЮЛ / Свидетельство о регистрации НКО",
     )
     founders_appointment_decision = models.FileField(
-        upload_to=organization_common_document_upload_to,
+        upload_to=organization_request_document_upload_to,
         verbose_name="Решение учредителей о назначении высшего коллегиального и исполнительного органа",
     )
     executive_passport_copy = models.FileField(
-        upload_to=organization_common_document_upload_to,
+        upload_to=organization_request_document_upload_to,
         verbose_name="Копия паспорта лица, осуществляющего функции единоличного исполнительного органа",
     )
     egrul_extract = models.FileField(
-        upload_to=organization_common_document_upload_to,
+        upload_to=organization_request_document_upload_to,
         verbose_name="Выписка из ЕГРЮЛ",
     )
     nko_registry_notice = models.FileField(
-        upload_to=organization_common_document_upload_to,
+        upload_to=organization_request_document_upload_to,
         verbose_name="Уведомление о включении в реестр НКО / Письмо-подтверждение о не включении",
     )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         abstract = True
@@ -267,7 +281,85 @@ class Event(models.Model):
         super().save(*args, **kwargs)
 
 
-class OrganizationRegistrationRequest(OrganizationCommonFieldsMixin):
+class EventImage(models.Model):
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="images",
+        verbose_name="Мероприятие",
+    )
+    image = models.ImageField(
+        upload_to=event_image_upload_to,
+        verbose_name="Изображение",
+    )
+    alt_text = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Альтернативный текст",
+    )
+    sort_order = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Порядок",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+
+    class Meta:
+        db_table = "event_images"
+        verbose_name = "Изображение мероприятия"
+        verbose_name_plural = "Изображения мероприятий"
+        ordering = ("sort_order", "id")
+
+    def __str__(self):
+        return f"{self.event} - {self.image.name}"
+
+
+class EventNews(models.Model):
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="news",
+        verbose_name="Мероприятие",
+    )
+    created_by_member = models.ForeignKey(
+        OrganizationMember,
+        on_delete=models.CASCADE,
+        related_name="created_event_news",
+        verbose_name="Создатель",
+    )
+    title = models.CharField(
+        max_length=200,
+        verbose_name="Заголовок",
+    )
+    text = models.TextField(verbose_name="Текст")
+    image = models.ImageField(
+        upload_to=event_news_image_upload_to,
+        verbose_name="Изображение",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
+
+    class Meta:
+        db_table = "event_news"
+        verbose_name = "Новость мероприятия"
+        verbose_name_plural = "Новости мероприятий"
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return self.title
+
+    def clean(self):
+        super().clean()
+        if (
+            self.created_by_member_id
+            and self.event_id
+            and self.created_by_member.organization_id != self.event.organization_id
+        ):
+            raise ValidationError(
+                {"created_by_member": "Создатель новости должен быть участником организации мероприятия."}
+            )
+
+
+class OrganizationRegistrationRequest(OrganizationCommonFieldsMixin, OrganizationDocumentFieldsMixin):
     class Status(models.TextChoices):
         PENDING = "pending", "На рассмотрении"
         APPROVED = "approved", "Одобрена"
