@@ -21,6 +21,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "full_name",
             "avatar",
             "bio",
+            "geodata",
         )
         read_only_fields = ("id", "full_name", "date_joined")
 
@@ -31,7 +32,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = get_user_model()
         fields = (
-            'first_name', 'last_name', 'avatar', 'bio'
+            'first_name', 'last_name', 'avatar', 'bio', 'geodata'
         )
 
 

@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -6,15 +8,16 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.common.models import City, GeoData
+
 from .models import (
     Category,
     Event,
     EventImage,
-    EventNews,
     Organization,
-    OrganizationCommonFieldsMixin,
-    OrganizationDocumentFieldsMixin,
     OrganizationMember,
+    OrganizationNews,
+    OrganizationNewsComment,
     OrganizationRegistrationRequest,
 )
 
@@ -23,14 +26,20 @@ def create_test_file(name):
     return SimpleUploadedFile(name, b"file-content", content_type="application/pdf")
 
 
-class OrganizationModelStructureTests(SimpleTestCase):
-    def test_organization_models_share_common_fields_mixin(self):
-        self.assertTrue(OrganizationCommonFieldsMixin._meta.abstract)
-        self.assertTrue(OrganizationDocumentFieldsMixin._meta.abstract)
-        self.assertTrue(issubclass(Organization, OrganizationCommonFieldsMixin))
-        self.assertTrue(issubclass(OrganizationRegistrationRequest, OrganizationCommonFieldsMixin))
-        self.assertTrue(issubclass(OrganizationRegistrationRequest, OrganizationDocumentFieldsMixin))
+def create_test_image_file(name="image.gif"):
+    return SimpleUploadedFile(
+        name,
+        (
+            b"GIF87a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
+            b"\xff\xff\xff,\x00\x00\x00\x00\x01\x00\x01\x00"
+            b"\x00\x02\x02D\x01\x00;"
+        ),
+        content_type="image/gif",
+    )
 
+
+class OrganizationModelStructureTests(SimpleTestCase):
+    def test_registration_request_stores_documents_without_duplicating_them_in_organization(self):
         common_fields = {
             "official_name",
             "legal_address",
@@ -51,12 +60,17 @@ class OrganizationModelStructureTests(SimpleTestCase):
             "egrul_extract",
             "nko_registry_notice",
         }
-        self.assertLessEqual(common_fields, {field.name for field in Organization._meta.fields})
+        organization_fields = {field.name for field in Organization._meta.fields}
+        registration_request_fields = {
+            field.name for field in OrganizationRegistrationRequest._meta.fields
+        }
+
+        self.assertLessEqual(common_fields, organization_fields)
         self.assertLessEqual(
             common_fields | document_fields,
-            {field.name for field in OrganizationRegistrationRequest._meta.fields},
+            registration_request_fields,
         )
-        self.assertTrue(document_fields.isdisjoint({field.name for field in Organization._meta.fields}))
+        self.assertTrue(document_fields.isdisjoint(organization_fields))
 
 
 class EventModelTests(APITestCase):
@@ -84,7 +98,6 @@ class EventModelTests(APITestCase):
         )
         self.event_category = Category.objects.create(
             name="Спорт",
-            scope=Category.Scope.EVENT,
         )
 
     def test_event_generates_slug_from_title(self):
@@ -127,50 +140,33 @@ class EventModelTests(APITestCase):
         self.assertEqual(list(event.images.all()), [second_image, first_image])
 
     def test_event_can_have_news_with_image_and_text(self):
-        event = Event.objects.create(
-            title="News Event",
-            content="Event with news",
-            category=self.event_category,
+        news = OrganizationNews.objects.create(
             organization=self.organization,
-            created_by_member=self.member,
-            starts_at=timezone.now(),
-        )
-
-        news = EventNews.objects.create(
-            event=event,
             created_by_member=self.member,
             title="Маршрут обновлён",
             text="Добавили новую точку старта.",
             image="route.jpg",
         )
 
-        self.assertEqual(event.news.count(), 1)
-        self.assertEqual(event.news.get(), news)
+        self.assertEqual(self.organization.news.count(), 1)
+        self.assertEqual(self.organization.news.get(), news)
         self.assertEqual(str(news), "Маршрут обновлён")
 
-    def test_all_users_can_view_event_news(self):
-        event = Event.objects.create(
-            title="Public News Event",
-            content="Public event with news",
-            category=self.event_category,
+    def test_all_users_can_view_organization_news(self):
+        OrganizationNews.objects.create(
             organization=self.organization,
-            created_by_member=self.member,
-            starts_at=timezone.now(),
-        )
-        EventNews.objects.create(
-            event=event,
             created_by_member=self.member,
             title="Открытая новость",
             text="Её видят все.",
             image="public.jpg",
         )
 
-        response = self.client.get("/api/v1/organizations/event-news/")
+        response = self.client.get("/api/v1/organizations/news/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data), 1)
 
-    def test_only_news_author_or_organization_manager_can_edit_event_news(self):
+    def test_only_news_author_or_organization_manager_can_edit_organization_news(self):
         author = self.user_model.objects.create_user(
             username="news-author",
             email="news-author@example.com",
@@ -186,16 +182,8 @@ class EventModelTests(APITestCase):
             email="outsider@example.com",
             password="StrongPassword123!",
         )
-        event = Event.objects.create(
-            title="Editable News Event",
-            content="Event with editable news",
-            category=self.event_category,
+        news = OrganizationNews.objects.create(
             organization=self.organization,
-            created_by_member=self.member,
-            starts_at=timezone.now(),
-        )
-        news = EventNews.objects.create(
-            event=event,
             created_by_member=author_member,
             title="Исходная новость",
             text="Текст.",
@@ -204,7 +192,7 @@ class EventModelTests(APITestCase):
 
         self.client.force_authenticate(outsider)
         response = self.client.patch(
-            f"/api/v1/organizations/event-news/{news.pk}/",
+            f"/api/v1/organizations/news/{news.pk}/",
             data={"title": "Чужая правка"},
             format="json",
         )
@@ -212,7 +200,7 @@ class EventModelTests(APITestCase):
 
         self.client.force_authenticate(author)
         response = self.client.patch(
-            f"/api/v1/organizations/event-news/{news.pk}/",
+            f"/api/v1/organizations/news/{news.pk}/",
             data={"title": "Правка автора"},
             format="json",
         )
@@ -220,28 +208,76 @@ class EventModelTests(APITestCase):
 
         self.client.force_authenticate(self.user)
         response = self.client.patch(
-            f"/api/v1/organizations/event-news/{news.pk}/",
+            f"/api/v1/organizations/news/{news.pk}/",
             data={"title": "Правка менеджера"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_event_rejects_non_event_category(self):
-        fundraising_category = Category.objects.create(
-            name="Сборы спорт",
-            scope=Category.Scope.FUNDRAISING,
-        )
-        event = Event(
-            title="Полумарафон",
-            content="Описание мероприятия",
-            category=fundraising_category,
+    def test_organization_news_detail_increments_views_count(self):
+        news = OrganizationNews.objects.create(
             organization=self.organization,
             created_by_member=self.member,
-            starts_at=timezone.now(),
+            title="Viewed News",
+            text="Text",
         )
 
-        with self.assertRaises(ValidationError):
-            event.full_clean()
+        response = self.client.get(f"/api/v1/organizations/news/{news.pk}/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["views_count"], 1)
+        news.refresh_from_db()
+        self.assertEqual(news.views_count, 1)
+
+    def test_authenticated_user_can_comment_organization_news(self):
+        news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.member,
+            title="Commented News",
+            text="Text",
+        )
+        self.client.force_authenticate(self.user)
+
+        response = self.client.post(
+            "/api/v1/organizations/news-comments/",
+            data={"news": news.pk, "text": "Nice update"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        comment = OrganizationNewsComment.objects.get(pk=response.data["id"])
+        self.assertEqual(comment.created_by, self.user)
+        self.assertEqual(comment.news, news)
+
+    def test_comment_news_cannot_be_changed(self):
+        news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.member,
+            title="First News",
+            text="Text",
+        )
+        other_news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.member,
+            title="Second News",
+            text="Text",
+        )
+        comment = OrganizationNewsComment.objects.create(
+            news=news,
+            created_by=self.user,
+            text="Initial comment",
+        )
+        self.client.force_authenticate(self.user)
+
+        response = self.client.patch(
+            f"/api/v1/organizations/news-comments/{comment.pk}/",
+            data={"news": other_news.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        comment.refresh_from_db()
+        self.assertEqual(comment.news, news)
 
     def test_event_rejects_member_from_another_organization(self):
         other_user = self.user_model.objects.create_user(
@@ -277,6 +313,300 @@ class EventModelTests(APITestCase):
             event.full_clean()
 
 
+class OrganizationAdministrationApiTests(APITestCase):
+    members_url = "/api/v1/organizations/members/"
+    events_url = "/api/v1/organizations/events/"
+    news_url = "/api/v1/organizations/news/"
+    organizations_url = "/api/v1/organizations/organizations/"
+    categories_url = "/api/v1/organizations/categories/"
+    event_images_url = "/api/v1/organizations/event-images/"
+
+    def setUp(self):
+        self.user_model = get_user_model()
+        self.manager = self.user_model.objects.create_user(
+            username="manager",
+            email="manager@example.com",
+            password="StrongPassword123!",
+        )
+        self.member_user = self.user_model.objects.create_user(
+            username="member",
+            email="member@example.com",
+            password="StrongPassword123!",
+        )
+        self.outsider = self.user_model.objects.create_user(
+            username="outsider-admin",
+            email="outsider-admin@example.com",
+            password="StrongPassword123!",
+        )
+        self.organization = Organization.objects.create(
+            created_by=self.manager,
+            official_name="Admin Org",
+            legal_address="Address",
+            phone="+7 777 000 00 00",
+            email="admin-org@example.com",
+            executive_person_full_name="Executive Person",
+            executive_authority_basis="Charter",
+            executive_body_name="Board",
+        )
+        self.manager_membership = OrganizationMember.objects.create(
+            organization=self.organization,
+            user=self.manager,
+            role=OrganizationMember.Role.MANAGER,
+        )
+        self.member_membership = OrganizationMember.objects.create(
+            organization=self.organization,
+            user=self.member_user,
+            role=OrganizationMember.Role.MEMBER,
+        )
+        self.event_category = Category.objects.create(name="Admin Category")
+        self.city, _ = City.objects.get_or_create(
+            geoname_id=1486209,
+            defaults={"name": "Yekaterinburg"},
+        )
+        self.geodata = GeoData.objects.create(
+            city=self.city,
+            street="Lenina, 1",
+            latitude="56.838011",
+            longitude="60.597465",
+        )
+
+    def test_manager_can_exclude_organization_member(self):
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.delete(f"{self.members_url}{self.member_membership.pk}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.member_membership.refresh_from_db()
+        self.assertFalse(self.member_membership.is_active)
+        self.assertIsNotNone(self.member_membership.removed_at)
+        self.assertEqual(self.member_membership.removed_by, self.manager)
+
+    def test_non_manager_cannot_exclude_organization_member(self):
+        self.client.force_authenticate(self.member_user)
+
+        response = self.client.delete(f"{self.members_url}{self.manager_membership.pk}/")
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(
+            OrganizationMember.objects.filter(pk=self.manager_membership.pk).exists()
+        )
+
+    def test_manager_cannot_remove_self_from_organization(self):
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.delete(f"{self.members_url}{self.manager_membership.pk}/")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(
+            OrganizationMember.objects.filter(pk=self.manager_membership.pk).exists()
+        )
+
+    def test_excluding_member_does_not_delete_member_content(self):
+        event = Event.objects.create(
+            title="Member Event",
+            content="Created by member",
+            category=self.event_category,
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            starts_at=timezone.now(),
+        )
+        news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Member News",
+            text="Created by member",
+        )
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.delete(f"{self.members_url}{self.member_membership.pk}/")
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertTrue(Event.objects.filter(pk=event.pk).exists())
+        self.assertTrue(OrganizationNews.objects.filter(pk=news.pk).exists())
+        self.member_membership.refresh_from_db()
+        self.assertFalse(self.member_membership.is_active)
+
+    def test_inactive_member_cannot_create_event(self):
+        self.member_membership.is_active = False
+        self.member_membership.removed_at = timezone.now()
+        self.member_membership.removed_by = self.manager
+        self.member_membership.save(
+            update_fields=("is_active", "removed_at", "removed_by")
+        )
+        self.client.force_authenticate(self.member_user)
+
+        response = self.client.post(
+            self.events_url,
+            data={
+                "title": "Inactive Member Event",
+                "content": "Should be rejected",
+                "category": self.event_category.pk,
+                "organization": self.organization.pk,
+                "starts_at": timezone.now().isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_manager_can_edit_and_delete_member_event(self):
+        event = Event.objects.create(
+            title="Member Event",
+            content="Created by member",
+            category=self.event_category,
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            starts_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.manager)
+
+        patch_response = self.client.patch(
+            f"{self.events_url}{event.pk}/",
+            data={"title": "Manager Edited Event"},
+            format="json",
+        )
+        delete_response = self.client.delete(f"{self.events_url}{event.pk}/")
+
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Event.objects.filter(pk=event.pk).exists())
+
+    def test_event_api_exposes_event_social_links(self):
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.post(
+            self.events_url,
+            data={
+                "title": "Linked Event",
+                "content": "Event with external links",
+                "category": self.event_category.pk,
+                "organization": self.organization.pk,
+                "geodata": self.geodata.pk,
+                "starts_at": timezone.now().isoformat(),
+                "max_url": "https://max.example.com/event-post",
+                "vk_url": "https://vk.com/event-post",
+                "website_url": "https://events.example.com/linked-event",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["geodata"], self.geodata.pk)
+        self.assertEqual(response.data["max_url"], "https://max.example.com/event-post")
+        self.assertEqual(response.data["vk_url"], "https://vk.com/event-post")
+        self.assertEqual(response.data["website_url"], "https://events.example.com/linked-event")
+
+    def test_event_api_rejects_end_before_start(self):
+        self.client.force_authenticate(self.manager)
+        starts_at = timezone.now()
+
+        response = self.client.post(
+            self.events_url,
+            data={
+                "title": "Invalid Event Dates",
+                "content": "Dates are invalid",
+                "category": self.event_category.pk,
+                "organization": self.organization.pk,
+                "starts_at": starts_at.isoformat(),
+                "ends_at": (starts_at - timedelta(hours=1)).isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("ends_at", response.data)
+
+    def test_manager_can_update_organization(self):
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.patch(
+            f"{self.organizations_url}{self.organization.pk}/",
+            data={"vk_url": "https://vk.com/admin-org"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.organization.refresh_from_db()
+        self.assertEqual(self.organization.vk_url, "https://vk.com/admin-org")
+
+    def test_categories_are_read_only_in_api(self):
+        self.client.force_authenticate(self.manager)
+
+        list_response = self.client.get(self.categories_url)
+        create_response = self.client.post(
+            self.categories_url,
+            data={"name": "Forbidden Category"},
+            format="json",
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(create_response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def test_manager_can_manage_event_images(self):
+        event = Event.objects.create(
+            title="Gallery Event",
+            content="Created by manager",
+            category=self.event_category,
+            organization=self.organization,
+            created_by_member=self.manager_membership,
+            starts_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.manager)
+
+        create_response = self.client.post(
+            self.event_images_url,
+            data={
+                "event": event.pk,
+                "image": create_test_image_file(),
+                "alt_text": "Start",
+                "sort_order": 1,
+            },
+            format="multipart",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        image = EventImage.objects.get(pk=create_response.data["id"])
+
+        patch_response = self.client.patch(
+            f"{self.event_images_url}{image.pk}/",
+            data={"alt_text": "Updated"},
+            format="json",
+        )
+        delete_response = self.client.delete(f"{self.event_images_url}{image.pk}/")
+
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(EventImage.objects.filter(pk=image.pk).exists())
+
+    def test_manager_can_edit_and_delete_member_event_news(self):
+        event = Event.objects.create(
+            title="News Parent Event",
+            content="Created by manager",
+            category=self.event_category,
+            organization=self.organization,
+            created_by_member=self.manager_membership,
+            starts_at=timezone.now(),
+        )
+        news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Member News",
+            text="Created by member",
+            image="news.jpg",
+        )
+        self.client.force_authenticate(self.manager)
+
+        patch_response = self.client.patch(
+            f"{self.news_url}{news.pk}/",
+            data={"title": "Manager Edited News"},
+            format="json",
+        )
+        delete_response = self.client.delete(f"{self.news_url}{news.pk}/")
+
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(OrganizationNews.objects.filter(pk=news.pk).exists())
+
+
 class OrganizationRegistrationRequestApiTests(APITestCase):
     url = "/api/v1/organizations/organization-registration-requests/"
 
@@ -306,6 +636,9 @@ class OrganizationRegistrationRequestApiTests(APITestCase):
             "legal_address": "г. Алматы, ул. Абая, 1",
             "phone": "+7 777 000 00 00",
             "email": f"fund{suffix}@example.com",
+            "max_url": f"https://max.example.com/fund-{suffix}",
+            "vk_url": f"https://vk.com/fund{suffix}",
+            "website_url": f"https://fund{suffix}.example.com",
             "executive_person_full_name": "Иванов Иван Иванович",
             "executive_authority_basis": "Устав",
             "executive_body_name": "Директор",
@@ -401,6 +734,9 @@ class OrganizationRegistrationRequestApiTests(APITestCase):
         self.assertEqual(registration_request.reviewed_by, self.admin_user)
         self.assertEqual(organization.created_by, self.user)
         self.assertEqual(organization.official_name, registration_request.official_name)
+        self.assertEqual(organization.max_url, registration_request.max_url)
+        self.assertEqual(organization.vk_url, registration_request.vk_url)
+        self.assertEqual(organization.website_url, registration_request.website_url)
         self.assertEqual(membership.role, OrganizationMember.Role.MANAGER)
 
     def test_staff_superuser_can_reject_pending_request(self):

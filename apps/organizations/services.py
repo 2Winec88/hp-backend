@@ -28,6 +28,9 @@ def approve_organization_registration_request(*, registration_request, reviewer)
         legal_address=registration_request.legal_address,
         phone=registration_request.phone,
         email=registration_request.email,
+        max_url=registration_request.max_url,
+        vk_url=registration_request.vk_url,
+        website_url=registration_request.website_url,
         executive_person_full_name=registration_request.executive_person_full_name,
         executive_authority_basis=registration_request.executive_authority_basis,
         executive_body_name=registration_request.executive_body_name,
@@ -56,7 +59,11 @@ def approve_organization_registration_request(*, registration_request, reviewer)
     return registration_request
 
 
+@transaction.atomic
 def reject_organization_registration_request(*, registration_request, reviewer, rejection_reason):
+    registration_request = OrganizationRegistrationRequest.objects.select_for_update().get(
+        pk=registration_request.pk
+    )
     _ensure_request_is_pending(registration_request)
 
     registration_request.status = OrganizationRegistrationRequest.Status.REJECTED

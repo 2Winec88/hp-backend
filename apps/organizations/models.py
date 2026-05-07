@@ -14,8 +14,12 @@ def event_image_upload_to(instance, filename):
     return f"events/{instance.event_id or 'new'}/images/{filename}"
 
 
+def organization_news_image_upload_to(instance, filename):
+    return f"organizations/{instance.organization_id or 'new'}/news/{filename}"
+
+
 def event_news_image_upload_to(instance, filename):
-    return f"events/{instance.event_id or 'new'}/news/{filename}"
+    return f"events/{getattr(instance, 'event_id', None) or 'new'}/news/{filename}"
 
 
 def organization_common_document_upload_to(instance, filename):
@@ -25,21 +29,13 @@ def organization_common_document_upload_to(instance, filename):
 
 
 class Category(models.Model):
-    class Scope(models.TextChoices):
-        EVENT = "event", "Мероприятия"
-        FUNDRAISING = "fundraising", "Сборы"
-
+    """Модель категории для Мероприятий"""
     name = models.CharField(max_length=100, verbose_name="Название")
     slug = models.SlugField(
         max_length=100,
         blank=True,
         allow_unicode=True,
         verbose_name="Slug",
-    )
-    scope = models.CharField(
-        max_length=20,
-        choices=Scope.choices,
-        verbose_name="Область",
     )
     description = models.TextField(blank=True, verbose_name="Описание")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
@@ -49,16 +45,6 @@ class Category(models.Model):
         verbose_name = "Категория"
         verbose_name_plural = "Категории"
         ordering = ("name",)
-        constraints = [
-            models.UniqueConstraint(
-                fields=("scope", "name"),
-                name="unique_category_name_per_scope",
-            ),
-            models.UniqueConstraint(
-                fields=("scope", "slug"),
-                name="unique_category_slug_per_scope",
-            ),
-        ]
 
     def __str__(self):
         return self.name
@@ -69,7 +55,7 @@ class Category(models.Model):
         super().save(*args, **kwargs)
 
 
-class OrganizationCommonFieldsMixin(models.Model):
+class Organization(models.Model):
     # Основная информация
     official_name = models.CharField(
         max_length=255,
@@ -86,6 +72,9 @@ class OrganizationCommonFieldsMixin(models.Model):
     email = models.EmailField(
         verbose_name="Email",
     )
+    max_url = models.URLField(blank=True, verbose_name="MAX")
+    vk_url = models.URLField(blank=True, verbose_name="VK")
+    website_url = models.URLField(blank=True, verbose_name="Website")
 
     # Исполнительный орган
     executive_person_full_name = models.CharField(
@@ -100,56 +89,14 @@ class OrganizationCommonFieldsMixin(models.Model):
         max_length=255,
         verbose_name="Наименование исполнительного органа",
     )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
-
-
-class OrganizationDocumentFieldsMixin(models.Model):
-    # Документы
-    charter_document = models.FileField(
-        upload_to=organization_request_document_upload_to,
-        verbose_name="Устав",
-    )
-    inn_certificate = models.FileField(
-        upload_to=organization_request_document_upload_to,
-        verbose_name="Свидетельство о присвоении ИНН",
-    )
-    state_registration_certificate = models.FileField(
-        upload_to=organization_request_document_upload_to,
-        verbose_name="Свидетельство о гос регистрации ЮЛ / Свидетельство о регистрации НКО",
-    )
-    founders_appointment_decision = models.FileField(
-        upload_to=organization_request_document_upload_to,
-        verbose_name="Решение учредителей о назначении высшего коллегиального и исполнительного органа",
-    )
-    executive_passport_copy = models.FileField(
-        upload_to=organization_request_document_upload_to,
-        verbose_name="Копия паспорта лица, осуществляющего функции единоличного исполнительного органа",
-    )
-    egrul_extract = models.FileField(
-        upload_to=organization_request_document_upload_to,
-        verbose_name="Выписка из ЕГРЮЛ",
-    )
-    nko_registry_notice = models.FileField(
-        upload_to=organization_request_document_upload_to,
-        verbose_name="Уведомление о включении в реестр НКО / Письмо-подтверждение о не включении",
-    )
-
-    class Meta:
-        abstract = True
-
-
-class Organization(OrganizationCommonFieldsMixin):
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="created_organizations",
         verbose_name="Создатель",
     )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "organizations"
@@ -181,6 +128,15 @@ class OrganizationMember(models.Model):
         choices=Role.choices,
         default=Role.MEMBER,
     )
+    is_active = models.BooleanField(default=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="removed_organization_memberships",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -211,6 +167,7 @@ class Event(models.Model):
         allow_unicode=True,
         verbose_name="Slug",
     )
+    
     content = models.TextField(verbose_name="Описание")
     image = models.ImageField(
         upload_to="events/",
@@ -222,7 +179,6 @@ class Event(models.Model):
         Category,
         on_delete=models.PROTECT,
         related_name="events",
-        limit_choices_to={"scope": Category.Scope.EVENT},
         verbose_name="Категория",
     )
     organization = models.ForeignKey(
@@ -231,6 +187,14 @@ class Event(models.Model):
         related_name="events",
         verbose_name="Организация",
     )
+    geodata = models.ForeignKey(
+        "common.GeoData",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="events",
+    )
+    
     created_by_member = models.ForeignKey(
         OrganizationMember,
         on_delete=models.CASCADE,
@@ -247,6 +211,9 @@ class Event(models.Model):
     ends_at = models.DateTimeField(null=True, blank=True, verbose_name="Дата окончания")
     city = models.CharField(max_length=100, blank=True, verbose_name="Город")
     is_online = models.BooleanField(default=False, verbose_name="Онлайн")
+    max_url = models.URLField(blank=True, verbose_name="MAX post")
+    vk_url = models.URLField(blank=True, verbose_name="VK post")
+    website_url = models.URLField(blank=True, verbose_name="Website event page")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
     published_at = models.DateTimeField(null=True, blank=True, verbose_name="Опубликовано")
@@ -262,8 +229,6 @@ class Event(models.Model):
 
     def clean(self):
         super().clean()
-        if self.category_id and self.category.scope != Category.Scope.EVENT:
-            raise ValidationError({"category": "Для мероприятия нужна категория мероприятий."})
         if (
             self.created_by_member_id
             and self.organization_id
@@ -313,17 +278,17 @@ class EventImage(models.Model):
         return f"{self.event} - {self.image.name}"
 
 
-class EventNews(models.Model):
-    event = models.ForeignKey(
-        Event,
+class OrganizationNews(models.Model):
+    organization = models.ForeignKey(
+        Organization,
         on_delete=models.CASCADE,
         related_name="news",
-        verbose_name="Мероприятие",
+        verbose_name="Организация",
     )
     created_by_member = models.ForeignKey(
         OrganizationMember,
         on_delete=models.CASCADE,
-        related_name="created_event_news",
+        related_name="created_organization_news",
         verbose_name="Создатель",
     )
     title = models.CharField(
@@ -332,16 +297,20 @@ class EventNews(models.Model):
     )
     text = models.TextField(verbose_name="Текст")
     image = models.ImageField(
-        upload_to=event_news_image_upload_to,
+        upload_to=organization_news_image_upload_to,
+        blank=True,
+        null=True,
         verbose_name="Изображение",
     )
+    comments = models.TextField(blank=True, verbose_name="Комментарии")
+    views_count = models.PositiveIntegerField(default=0, verbose_name="Просмотры")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
 
     class Meta:
-        db_table = "event_news"
-        verbose_name = "Новость мероприятия"
-        verbose_name_plural = "Новости мероприятий"
+        db_table = "organization_news"
+        verbose_name = "Новость организации"
+        verbose_name_plural = "Новости организаций"
         ordering = ("-created_at", "-id")
 
     def __str__(self):
@@ -351,20 +320,110 @@ class EventNews(models.Model):
         super().clean()
         if (
             self.created_by_member_id
-            and self.event_id
-            and self.created_by_member.organization_id != self.event.organization_id
+            and self.organization_id
+            and self.created_by_member.organization_id != self.organization_id
         ):
             raise ValidationError(
-                {"created_by_member": "Создатель новости должен быть участником организации мероприятия."}
+                {"created_by_member": "Создатель новости должен быть участником этой организации."}
             )
 
 
-class OrganizationRegistrationRequest(OrganizationCommonFieldsMixin, OrganizationDocumentFieldsMixin):
+class OrganizationNewsComment(models.Model):
+    news = models.ForeignKey(
+        OrganizationNews,
+        on_delete=models.CASCADE,
+        related_name="comment_items",
+        verbose_name="Новость",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="organization_news_comments",
+        verbose_name="Автор",
+    )
+    text = models.TextField(verbose_name="Комментарий")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Обновлено")
+
+    class Meta:
+        db_table = "organization_news_comments"
+        verbose_name = "Комментарий к новости"
+        verbose_name_plural = "Комментарии к новостям"
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"{self.created_by} - {self.news}"
+
+
+class OrganizationRegistrationRequest(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "На рассмотрении"
         APPROVED = "approved", "Одобрена"
         REJECTED = "rejected", "Отклонена"
 
+    # Основная информация
+    official_name = models.CharField(
+        max_length=255,
+        verbose_name="Официальное название организации",
+    )
+    legal_address = models.CharField(
+        max_length=500,
+        verbose_name="Юридический адрес",
+    )
+    phone = models.CharField(
+        max_length=50,
+        verbose_name="Телефон",
+    )
+    email = models.EmailField(
+        verbose_name="Email",
+    )
+    max_url = models.URLField(blank=True, verbose_name="MAX")
+    vk_url = models.URLField(blank=True, verbose_name="VK")
+    website_url = models.URLField(blank=True, verbose_name="Website")
+
+    # Исполнительный орган
+    executive_person_full_name = models.CharField(
+        max_length=255,
+        verbose_name="ФИО исполнительного лица",
+    )
+    executive_authority_basis = models.CharField(
+        max_length=500,
+        verbose_name="Действующий на основании",
+    )
+    executive_body_name = models.CharField(
+        max_length=255,
+        verbose_name="Наименование исполнительного органа",
+    )
+
+    # Документы
+    charter_document = models.FileField(
+        upload_to=organization_request_document_upload_to,
+        verbose_name="Устав",
+    )
+    inn_certificate = models.FileField(
+        upload_to=organization_request_document_upload_to,
+        verbose_name="Свидетельство о присвоении ИНН",
+    )
+    state_registration_certificate = models.FileField(
+        upload_to=organization_request_document_upload_to,
+        verbose_name="Свидетельство о гос регистрации ЮЛ / Свидетельство о регистрации НКО",
+    )
+    founders_appointment_decision = models.FileField(
+        upload_to=organization_request_document_upload_to,
+        verbose_name="Решение учредителей о назначении высшего коллегиального и исполнительного органа",
+    )
+    executive_passport_copy = models.FileField(
+        upload_to=organization_request_document_upload_to,
+        verbose_name="Копия паспорта лица, осуществляющего функции единоличного исполнительного органа",
+    )
+    egrul_extract = models.FileField(
+        upload_to=organization_request_document_upload_to,
+        verbose_name="Выписка из ЕГРЮЛ",
+    )
+    nko_registry_notice = models.FileField(
+        upload_to=organization_request_document_upload_to,
+        verbose_name="Уведомление о включении в реестр НКО / Письмо-подтверждение о не включении",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -392,6 +451,8 @@ class OrganizationRegistrationRequest(OrganizationCommonFieldsMixin, Organizatio
         blank=True,
         related_name="registration_request",
     )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "organization_registration_requests"

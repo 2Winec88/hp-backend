@@ -1,16 +1,35 @@
+from django.db.models import F
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import Event, EventNews, OrganizationMember, OrganizationRegistrationRequest
+from .models import (
+    Category,
+    Event,
+    EventImage,
+    Organization,
+    OrganizationMember,
+    OrganizationNews,
+    OrganizationNewsComment,
+    OrganizationRegistrationRequest,
+)
 from .permissions import (
-    IsReadOnlyOrEventAuthorOrOrganizationManager,
-    IsReadOnlyOrEventNewsAuthorOrOrganizationManager,
+    IsOrganizationManager,
+    IsReadOnlyOrCommentAuthorOrOrganizationManager,
+    IsReadOnlyOrEventImageAuthorOrOrganizationManager,
+    IsReadOnlyOrOrganizationManager,
+    IsReadOnlyOrOrganizationContentAuthorOrManager,
     IsStaffSuperuser,
 )
 from .serializers import (
+    CategorySerializer,
+    EventImageSerializer,
     EventSerializer,
-    EventNewsSerializer,
+    OrganizationSerializer,
+    OrganizationNewsCommentSerializer,
+    OrganizationNewsSerializer,
+    OrganizationMemberSerializer,
     OrganizationRegistrationDecisionSerializer,
     OrganizationRegistrationRequestCreateSerializer,
     OrganizationRegistrationRequestReadSerializer,
@@ -21,9 +40,90 @@ from .services import (
 )
 
 
-class EventViewSet(viewsets.ModelViewSet):
+class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+
+
+class OrganizationViewSet(viewsets.ModelViewSet):
+    queryset = Organization.objects.select_related("created_by")
+    serializer_class = OrganizationSerializer
+    permission_classes = [IsReadOnlyOrOrganizationManager]
+    http_method_names = ["get", "patch", "head", "options"]
+
+
+class OrganizationMemberViewSet(viewsets.ModelViewSet):
+    serializer_class = OrganizationMemberSerializer
+    permission_classes = [IsOrganizationManager]
+    http_method_names = ["get", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = OrganizationMember.objects.select_related(
+            "organization",
+            "user",
+        )
+        if not user or not user.is_authenticated:
+            return queryset.none()
+
+        managed_organization_ids = OrganizationMember.objects.filter(
+            user=user,
+            role=OrganizationMember.Role.MANAGER,
+            is_active=True,
+        ).values("organization_id")
+        queryset = queryset.filter(
+            organization_id__in=managed_organization_ids,
+            is_active=True,
+        )
+
+        organization_id = self.request.query_params.get("organization")
+        if organization_id:
+            queryset = queryset.filter(organization_id=organization_id)
+
+        return queryset
+
+    def destroy(self, request, *args, **kwargs):
+        membership = self.get_object()
+
+        if membership.user_id == request.user.id:
+            return Response(
+                {"detail": "Managers cannot remove themselves from an organization."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if membership.role == OrganizationMember.Role.MANAGER:
+            manager_count = OrganizationMember.objects.filter(
+                organization=membership.organization,
+                role=OrganizationMember.Role.MANAGER,
+                is_active=True,
+            ).count()
+            if manager_count <= 1:
+                return Response(
+                    {"detail": "Cannot remove the last organization manager."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        membership.is_active = False
+        membership.removed_at = timezone.now()
+        membership.removed_by = request.user
+        membership.save(update_fields=("is_active", "removed_at", "removed_by"))
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OrganizationContentViewSetMixin:
+    def perform_create(self, serializer):
+        organization = serializer.validated_data["organization"]
+        member = OrganizationMember.objects.get(
+            organization=organization,
+            user=self.request.user,
+            is_active=True,
+        )
+        serializer.save(created_by_member=member)
+
+
+class EventViewSet(OrganizationContentViewSetMixin, viewsets.ModelViewSet):
     serializer_class = EventSerializer
-    permission_classes = [IsReadOnlyOrEventAuthorOrOrganizationManager]
+    permission_classes = [IsReadOnlyOrOrganizationContentAuthorOrManager]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
@@ -34,39 +134,72 @@ class EventViewSet(viewsets.ModelViewSet):
             "organization",
         )
 
-    def perform_create(self, serializer):
-        organization = serializer.validated_data["organization"]
-        member = OrganizationMember.objects.get(
-            organization=organization,
-            user=self.request.user,
-        )
-        serializer.save(created_by_member=member)
 
-
-class EventNewsViewSet(viewsets.ModelViewSet):
-    serializer_class = EventNewsSerializer
-    permission_classes = [IsReadOnlyOrEventNewsAuthorOrOrganizationManager]
+class EventImageViewSet(viewsets.ModelViewSet):
+    serializer_class = EventImageSerializer
+    permission_classes = [IsReadOnlyOrEventImageAuthorOrOrganizationManager]
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        queryset = EventNews.objects.select_related(
-            "created_by_member",
-            "created_by_member__user",
+        queryset = EventImage.objects.select_related(
             "event",
             "event__organization",
+            "event__created_by_member",
+            "event__created_by_member__user",
         )
         event_id = self.request.query_params.get("event")
         if event_id:
             queryset = queryset.filter(event_id=event_id)
         return queryset
 
-    def perform_create(self, serializer):
-        event = serializer.validated_data["event"]
-        member = OrganizationMember.objects.get(
-            organization=event.organization,
-            user=self.request.user,
+
+class OrganizationNewsViewSet(OrganizationContentViewSetMixin, viewsets.ModelViewSet):
+    serializer_class = OrganizationNewsSerializer
+    permission_classes = [IsReadOnlyOrOrganizationContentAuthorOrManager]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = OrganizationNews.objects.select_related(
+            "created_by_member",
+            "created_by_member__user",
+            "organization",
         )
-        serializer.save(created_by_member=member)
+        organization_id = self.request.query_params.get("organization")
+        if organization_id:
+            queryset = queryset.filter(organization_id=organization_id)
+        return queryset
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        OrganizationNews.objects.filter(pk=instance.pk).update(
+            views_count=F("views_count") + 1
+        )
+        instance.refresh_from_db(fields=("views_count",))
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+
+EventNewsViewSet = OrganizationNewsViewSet
+
+
+class OrganizationNewsCommentViewSet(viewsets.ModelViewSet):
+    serializer_class = OrganizationNewsCommentSerializer
+    permission_classes = [IsReadOnlyOrCommentAuthorOrOrganizationManager]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = OrganizationNewsComment.objects.select_related(
+            "created_by",
+            "news",
+            "news__organization",
+        )
+        news_id = self.request.query_params.get("news")
+        if news_id:
+            queryset = queryset.filter(news_id=news_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 
 class OrganizationRegistrationRequestViewSet(viewsets.ModelViewSet):

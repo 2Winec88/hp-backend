@@ -13,6 +13,8 @@ COPY pyproject.toml uv.lock ./
 
 RUN pip install --no-cache-dir \
     "celery>=5.6.3" \
+    "channels[daphne]>=4.3.2" \
+    "channels-redis>=4.3.0" \
     "Django>=6.0.4" \
     "django-cors-headers>=4.9.0" \
     "django-debug-toolbar>=6.3.0" \

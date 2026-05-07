@@ -1,6 +1,70 @@
 from rest_framework import serializers
 
-from .models import Category, Event, EventNews, OrganizationMember, OrganizationRegistrationRequest
+from .models import (
+    Category,
+    Event,
+    EventImage,
+    Organization,
+    OrganizationMember,
+    OrganizationNews,
+    OrganizationNewsComment,
+    OrganizationRegistrationRequest,
+)
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+        fields = ("id", "name", "slug", "description", "created_at")
+        read_only_fields = fields
+
+
+class OrganizationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Organization
+        fields = (
+            "id",
+            "official_name",
+            "legal_address",
+            "phone",
+            "email",
+            "max_url",
+            "vk_url",
+            "website_url",
+            "executive_person_full_name",
+            "executive_authority_basis",
+            "executive_body_name",
+            "created_by",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_by", "created_at", "updated_at")
+
+
+class OrganizationMemberSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_full_name = serializers.CharField(source="user.full_name", read_only=True)
+    organization_name = serializers.CharField(
+        source="organization.official_name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = OrganizationMember
+        fields = (
+            "id",
+            "organization",
+            "organization_name",
+            "user",
+            "user_email",
+            "user_full_name",
+            "role",
+            "is_active",
+            "removed_at",
+            "removed_by",
+            "created_at",
+        )
+        read_only_fields = fields
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -16,22 +80,21 @@ class EventSerializer(serializers.ModelSerializer):
             "image",
             "category",
             "organization",
+            "geodata",
             "created_by_member",
             "status",
             "starts_at",
             "ends_at",
             "city",
             "is_online",
+            "max_url",
+            "vk_url",
+            "website_url",
             "created_at",
             "updated_at",
             "published_at",
         )
         read_only_fields = ("id", "slug", "created_by_member", "created_at", "updated_at")
-
-    def validate_category(self, category):
-        if category.scope != Category.Scope.EVENT:
-            raise serializers.ValidationError("Event category is required.")
-        return category
 
     def validate_organization(self, organization):
         request = self.context.get("request")
@@ -41,32 +104,28 @@ class EventSerializer(serializers.ModelSerializer):
         if not OrganizationMember.objects.filter(
             organization=organization,
             user=user,
+            is_active=True,
         ).exists():
-            raise serializers.ValidationError("User is not a member of this organization.")
+            raise serializers.ValidationError("User is not an active member of this organization.")
         return organization
 
     def validate(self, attrs):
         if self.instance and "organization" in attrs and attrs["organization"] != self.instance.organization:
             raise serializers.ValidationError({"organization": "Organization cannot be changed."})
+        starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
+        ends_at = attrs.get("ends_at", getattr(self.instance, "ends_at", None))
+        if starts_at and ends_at and ends_at < starts_at:
+            raise serializers.ValidationError(
+                {"ends_at": "End date cannot be earlier than start date."}
+            )
         return attrs
 
 
-class EventNewsSerializer(serializers.ModelSerializer):
-    created_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
-
+class EventImageSerializer(serializers.ModelSerializer):
     class Meta:
-        model = EventNews
-        fields = (
-            "id",
-            "event",
-            "created_by_member",
-            "title",
-            "text",
-            "image",
-            "created_at",
-            "updated_at",
-        )
-        read_only_fields = ("id", "created_by_member", "created_at", "updated_at")
+        model = EventImage
+        fields = ("id", "event", "image", "alt_text", "sort_order", "created_at")
+        read_only_fields = ("id", "created_at")
 
     def validate_event(self, event):
         request = self.context.get("request")
@@ -76,13 +135,89 @@ class EventNewsSerializer(serializers.ModelSerializer):
         if not OrganizationMember.objects.filter(
             organization=event.organization,
             user=user,
+            is_active=True,
         ).exists():
-            raise serializers.ValidationError("User is not a member of this event organization.")
+            raise serializers.ValidationError("User is not an active member of this organization.")
         return event
 
     def validate(self, attrs):
         if self.instance and "event" in attrs and attrs["event"] != self.instance.event:
             raise serializers.ValidationError({"event": "Event cannot be changed."})
+        return attrs
+
+
+class OrganizationNewsSerializer(serializers.ModelSerializer):
+    created_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
+    comments_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrganizationNews
+        fields = (
+            "id",
+            "organization",
+            "created_by_member",
+            "title",
+            "text",
+            "image",
+            "comments",
+            "comments_count",
+            "views_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "created_by_member",
+            "comments_count",
+            "views_count",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_comments_count(self, obj):
+        return obj.comment_items.count()
+
+    def validate_organization(self, organization):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            raise serializers.ValidationError("Authentication is required.")
+        if not OrganizationMember.objects.filter(
+            organization=organization,
+            user=user,
+            is_active=True,
+        ).exists():
+            raise serializers.ValidationError("User is not an active member of this organization.")
+        return organization
+
+    def validate(self, attrs):
+        if self.instance and "organization" in attrs and attrs["organization"] != self.instance.organization:
+            raise serializers.ValidationError({"organization": "Organization cannot be changed."})
+        return attrs
+
+
+EventNewsSerializer = OrganizationNewsSerializer
+
+
+class OrganizationNewsCommentSerializer(serializers.ModelSerializer):
+    created_by_email = serializers.EmailField(source="created_by.email", read_only=True)
+
+    class Meta:
+        model = OrganizationNewsComment
+        fields = (
+            "id",
+            "news",
+            "created_by",
+            "created_by_email",
+            "text",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_by", "created_by_email", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        if self.instance and "news" in attrs and attrs["news"] != self.instance.news:
+            raise serializers.ValidationError({"news": "News cannot be changed."})
         return attrs
 
 
@@ -124,6 +259,9 @@ class OrganizationRegistrationRequestReadSerializer(serializers.ModelSerializer)
             "legal_address",
             "phone",
             "email",
+            "max_url",
+            "vk_url",
+            "website_url",
             "executive_person_full_name",
             "executive_authority_basis",
             "executive_body_name",

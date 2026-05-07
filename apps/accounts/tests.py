@@ -7,6 +7,8 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.common.models import City, GeoData
+
 from .models import EmailVerificationCode
 
 
@@ -106,3 +108,37 @@ class RegistrationFlowTests(APITestCase):
 
         self.assertEqual(login_response.status_code, status.HTTP_200_OK)
         self.assertIn("access", login_response.data)
+
+
+class ProfileGeoDataTests(APITestCase):
+    profile_url = "/api/v1/accounts/profile/"
+
+    def test_user_can_store_geodata_reference(self):
+        user = get_user_model().objects.create_user(
+            username="geo-profile",
+            email="geo-profile@example.com",
+            password="StrongPassword123!",
+            is_active=True,
+            is_email_verified=True,
+        )
+        city, _ = City.objects.get_or_create(
+            geoname_id=1486209,
+            defaults={"name": "Yekaterinburg"},
+        )
+        geodata = GeoData.objects.create(
+            city=city,
+            street="Lenina, 1",
+            latitude="56.838011",
+            longitude="60.597465",
+        )
+        self.client.force_authenticate(user)
+
+        response = self.client.patch(
+            self.profile_url,
+            data={"geodata": geodata.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        user.refresh_from_db()
+        self.assertEqual(user.geodata, geodata)

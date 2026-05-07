@@ -49,6 +49,7 @@ DJANGO_APPS = [
 ]
 
 THIRD_PARTY_APPS = [
+    'channels',
     'rest_framework',
     'drf_spectacular',
     'debug_toolbar',
@@ -60,10 +61,12 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     'apps.accounts.apps.AccountsConfig',
     'apps.collections.apps.CollectionsConfig',
+    'apps.communications.apps.CommunicationsConfig',
+    'apps.common.apps.CommonConfig',
     'apps.organizations.apps.OrganizationsConfig',
 ]
 
-INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+INSTALLED_APPS = ['daphne'] + DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -94,6 +97,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'hp_backend.wsgi.application'
+ASGI_APPLICATION = 'hp_backend.asgi.application'
 
 
 # Database
@@ -197,6 +201,15 @@ DEFAULT_FROM_EMAIL = config(
 )
 
 REDIS_URL = config('REDIS_URL', default='redis://127.0.0.1:6379/0')
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [REDIS_URL],
+        },
+    },
+}
 
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default=REDIS_URL)
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default=REDIS_URL)

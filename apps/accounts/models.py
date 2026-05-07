@@ -10,6 +10,13 @@ class User(AbstractUser):
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     bio = models.TextField(max_length=500, blank=True)
     is_email_verified = models.BooleanField(default=False)
+    geodata = models.ForeignKey(
+        "common.GeoData",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="users",
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]

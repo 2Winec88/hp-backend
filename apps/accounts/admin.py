@@ -38,7 +38,7 @@ class CustomUserAdmin(UserAdmin):
 
     fieldsets = (
         (None, {"fields": ("email", "username", "password")}),
-        ("Personal info", {"fields": ("first_name", "last_name", "avatar", "bio")}),
+        ("Personal info", {"fields": ("first_name", "last_name", "avatar", "bio", "geodata")}),
         (
             "Permissions",
             {
@@ -54,6 +54,7 @@ class CustomUserAdmin(UserAdmin):
         ),
         ("Important dates", {"fields": ("last_login", "date_joined")}),
     )
+    autocomplete_fields = ("geodata",)
 
     add_fieldsets = (
         (
