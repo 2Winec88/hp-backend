@@ -5,9 +5,12 @@ from .models import (
     Event,
     EventImage,
     Organization,
+    OrganizationBranch,
+    OrganizationBranchImage,
     OrganizationMember,
     OrganizationNews,
     OrganizationNewsComment,
+    OrganizationNewsImage,
     OrganizationRegistrationRequest,
 )
 
@@ -65,6 +68,82 @@ class OrganizationMemberSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+
+class OrganizationBranchImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrganizationBranchImage
+        fields = ("id", "branch", "image", "alt_text", "sort_order", "created_at")
+        read_only_fields = ("id", "created_at")
+
+    def validate_branch(self, branch):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            raise serializers.ValidationError("Authentication is required.")
+        if not OrganizationMember.objects.filter(
+            organization=branch.organization,
+            user=user,
+            role=OrganizationMember.Role.MANAGER,
+            is_active=True,
+        ).exists():
+            raise serializers.ValidationError(
+                "Only an active organization manager can add branch images."
+            )
+        return branch
+
+    def validate(self, attrs):
+        if self.instance and "branch" in attrs and attrs["branch"] != self.instance.branch:
+            raise serializers.ValidationError({"branch": "Branch cannot be changed."})
+        return attrs
+
+
+class OrganizationBranchSerializer(serializers.ModelSerializer):
+    images = OrganizationBranchImageSerializer(many=True, read_only=True)
+    images_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrganizationBranch
+        fields = (
+            "id",
+            "organization",
+            "geodata",
+            "name",
+            "description",
+            "phone",
+            "email",
+            "working_hours",
+            "is_active",
+            "images",
+            "images_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "images", "images_count", "created_at", "updated_at")
+
+    def get_images_count(self, obj):
+        return obj.images.count()
+
+    def validate_organization(self, organization):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            raise serializers.ValidationError("Authentication is required.")
+        if not OrganizationMember.objects.filter(
+            organization=organization,
+            user=user,
+            role=OrganizationMember.Role.MANAGER,
+            is_active=True,
+        ).exists():
+            raise serializers.ValidationError(
+                "Only an active organization manager can manage branches."
+            )
+        return organization
+
+    def validate(self, attrs):
+        if self.instance and "organization" in attrs and attrs["organization"] != self.instance.organization:
+            raise serializers.ValidationError({"organization": "Organization cannot be changed."})
+        return attrs
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -146,9 +225,41 @@ class EventImageSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class OrganizationNewsImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrganizationNewsImage
+        fields = ("id", "news", "image", "alt_text", "sort_order", "created_at")
+        read_only_fields = ("id", "created_at")
+
+    def validate_news(self, news):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            raise serializers.ValidationError("Authentication is required.")
+        if news.created_by_member.user_id == user.id and news.created_by_member.is_active:
+            return news
+        if OrganizationMember.objects.filter(
+            organization=news.organization,
+            user=user,
+            role=OrganizationMember.Role.MANAGER,
+            is_active=True,
+        ).exists():
+            return news
+        raise serializers.ValidationError(
+            "Only the news author or an organization manager can add images."
+        )
+
+    def validate(self, attrs):
+        if self.instance and "news" in attrs and attrs["news"] != self.instance.news:
+            raise serializers.ValidationError({"news": "News cannot be changed."})
+        return attrs
+
+
 class OrganizationNewsSerializer(serializers.ModelSerializer):
     created_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
+    images = OrganizationNewsImageSerializer(many=True, read_only=True)
     comments_count = serializers.SerializerMethodField()
+    images_count = serializers.SerializerMethodField()
 
     class Meta:
         model = OrganizationNews
@@ -159,8 +270,10 @@ class OrganizationNewsSerializer(serializers.ModelSerializer):
             "title",
             "text",
             "image",
+            "images",
             "comments",
             "comments_count",
+            "images_count",
             "views_count",
             "created_at",
             "updated_at",
@@ -168,7 +281,9 @@ class OrganizationNewsSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "created_by_member",
+            "images",
             "comments_count",
+            "images_count",
             "views_count",
             "created_at",
             "updated_at",
@@ -176,6 +291,9 @@ class OrganizationNewsSerializer(serializers.ModelSerializer):
 
     def get_comments_count(self, obj):
         return obj.comment_items.count()
+
+    def get_images_count(self, obj):
+        return obj.images.count()
 
     def validate_organization(self, organization):
         request = self.context.get("request")

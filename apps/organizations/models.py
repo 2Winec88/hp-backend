@@ -18,6 +18,14 @@ def organization_news_image_upload_to(instance, filename):
     return f"organizations/{instance.organization_id or 'new'}/news/{filename}"
 
 
+def organization_news_gallery_image_upload_to(instance, filename):
+    return f"organizations/{instance.news.organization_id or 'new'}/news/{instance.news_id or 'new'}/images/{filename}"
+
+
+def organization_branch_image_upload_to(instance, filename):
+    return f"organizations/{instance.branch.organization_id or 'new'}/branches/{instance.branch_id or 'new'}/images/{filename}"
+
+
 def event_news_image_upload_to(instance, filename):
     return f"events/{getattr(instance, 'event_id', None) or 'new'}/news/{filename}"
 
@@ -152,6 +160,71 @@ class OrganizationMember(models.Model):
 
     def __str__(self):
         return f"{self.user} -> {self.organization} ({self.role})"
+
+
+class OrganizationBranch(models.Model):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="branches",
+        verbose_name="Organization",
+    )
+    geodata = models.ForeignKey(
+        "common.GeoData",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="organization_branches",
+    )
+    name = models.CharField(max_length=200, verbose_name="Name")
+    description = models.TextField(blank=True, verbose_name="Description")
+    phone = models.CharField(max_length=50, blank=True, verbose_name="Phone")
+    email = models.EmailField(blank=True, verbose_name="Email")
+    working_hours = models.TextField(blank=True, verbose_name="Working hours")
+    is_active = models.BooleanField(default=True, verbose_name="Active")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated")
+
+    class Meta:
+        db_table = "organization_branches"
+        verbose_name = "Organization branch"
+        verbose_name_plural = "Organization branches"
+        ordering = ("organization__official_name", "name", "id")
+
+    def __str__(self):
+        return f"{self.name} ({self.organization})"
+
+
+class OrganizationBranchImage(models.Model):
+    branch = models.ForeignKey(
+        OrganizationBranch,
+        on_delete=models.CASCADE,
+        related_name="images",
+        verbose_name="Branch",
+    )
+    image = models.ImageField(
+        upload_to=organization_branch_image_upload_to,
+        verbose_name="Image",
+    )
+    alt_text = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Alternative text",
+    )
+    sort_order = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Sort order",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created")
+
+    class Meta:
+        db_table = "organization_branch_images"
+        verbose_name = "Organization branch image"
+        verbose_name_plural = "Organization branch images"
+        ordering = ("sort_order", "id")
+
+    def __str__(self):
+        return f"{self.branch} - {self.image.name}"
 
 
 class Event(models.Model):
@@ -326,6 +399,38 @@ class OrganizationNews(models.Model):
             raise ValidationError(
                 {"created_by_member": "Создатель новости должен быть участником этой организации."}
             )
+
+
+class OrganizationNewsImage(models.Model):
+    news = models.ForeignKey(
+        OrganizationNews,
+        on_delete=models.CASCADE,
+        related_name="images",
+        verbose_name="Новость",
+    )
+    image = models.ImageField(
+        upload_to=organization_news_gallery_image_upload_to,
+        verbose_name="Изображение",
+    )
+    alt_text = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Альтернативный текст",
+    )
+    sort_order = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Порядок",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Создано")
+
+    class Meta:
+        db_table = "organization_news_images"
+        verbose_name = "Изображение новости организации"
+        verbose_name_plural = "Изображения новостей организаций"
+        ordering = ("sort_order", "id")
+
+    def __str__(self):
+        return f"{self.news} - {self.image.name}"
 
 
 class OrganizationNewsComment(models.Model):

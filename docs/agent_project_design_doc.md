@@ -193,8 +193,11 @@ Email verification отправляется через Celery-задачу `send
 Ключевые endpoints:
 
 - `GET/DELETE /api/v1/organizations/members/`
+- `GET/POST/PATCH/DELETE /api/v1/organizations/branches/`
+- `GET/POST/PATCH/DELETE /api/v1/organizations/branch-images/`
 - `GET/POST/PATCH/DELETE /api/v1/organizations/events/`
 - `GET/POST/PATCH/DELETE /api/v1/organizations/news/`
+- `GET/POST/PATCH/DELETE /api/v1/organizations/news-images/`
 - `GET/POST/PATCH/DELETE /api/v1/organizations/news-comments/`
 - `GET/POST /api/v1/organizations/organization-registration-requests/`
 - `POST /api/v1/organizations/organization-registration-requests/{id}/approve/`
@@ -514,8 +517,10 @@ uv run python manage.py makemigrations --check --dry-run
    - Не переписывать общий invitation API.
 
 5. GeoNames import.
-   - Реализовать management command.
+   - Русскоязычный JSON import: `uv run python manage.py import_russia_locations`.
+   - Загружать регионы в `common.Region`.
    - Загружать города в `common.City`.
+   - Не менять текущую схему `GeoData`: адресная строка остается optional, координаты хранятся отдельно.
    - Не открывать публичный POST для городов.
 
 ## 14. Предупреждения для агента

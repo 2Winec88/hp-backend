@@ -131,7 +131,7 @@ Update payload supports: `first_name`, `last_name`, `avatar`, `bio`, `geodata`.
 
 ```http
 GET /api/v1/common/regions/
-GET /api/v1/common/regions/?search=sver
+GET /api/v1/common/regions/?search=сверд
 GET /api/v1/common/regions/{id}/
 ```
 
@@ -142,7 +142,7 @@ Response item:
 ```json
 {
   "id": 1,
-  "name": "Sverdlovsk Oblast",
+  "name": "Свердловская область",
   "geoname_id": null,
   "latitude": null,
   "longitude": null,
@@ -156,24 +156,25 @@ Response item:
 
 ```http
 GET /api/v1/common/cities/
-GET /api/v1/common/cities/?search=yek
+GET /api/v1/common/cities/?search=екат
+GET /api/v1/common/cities/?search=екат&limit=10
 GET /api/v1/common/cities/{id}/
 ```
 
-Города read-only для публичного API. Для выбора города используйте autocomplete через `search`. Backend ищет по названию города, названию региона и коду страны.
+Города read-only для публичного API. Для выбора города в адресе мероприятия или филиала используйте autocomplete через `search`. Backend ищет по названию города, названию региона и коду страны, приоритизирует совпадение с началом названия города и возвращает до `limit` записей. `limit` optional, по умолчанию `20`, максимум `100`.
 
 Response item:
 
 ```json
 {
   "id": 1,
-  "name": "Yekaterinburg",
-  "geoname_id": 1486209,
-  "latitude": "56.857500",
-  "longitude": "60.612500",
+  "name": "Екатеринбург",
+  "geoname_id": null,
+  "latitude": "56.838011",
+  "longitude": "60.597465",
   "country_code": "RU",
   "region": 1,
-  "region_name": "Sverdlovsk Oblast",
+  "region_name": "Свердловская область",
   "created_at": "...",
   "updated_at": "..."
 }
@@ -208,8 +209,8 @@ Response:
 {
   "id": 1,
   "city": 1,
-  "city_name": "Yekaterinburg",
-  "region_name": "Sverdlovsk Oblast",
+  "city_name": "Екатеринбург",
+  "region_name": "Свердловская область",
   "street": "Lenina, 1",
   "latitude": "56.838011",
   "longitude": "60.597465",
@@ -336,6 +337,78 @@ GET /api/v1/organizations/categories/{id}/
 
 Категории read-only для frontend.
 
+### Branches
+
+```http
+GET    /api/v1/organizations/branches/
+GET    /api/v1/organizations/branches/?organization=1
+POST   /api/v1/organizations/branches/
+GET    /api/v1/organizations/branches/{id}/
+PATCH  /api/v1/organizations/branches/{id}/
+DELETE /api/v1/organizations/branches/{id}/
+```
+
+Филиалы принадлежат организации и используют `common.GeoData` для геолокации. Читать могут все. Создавать, редактировать и удалять филиалы может только активный менеджер организации. `organization` нельзя менять после создания.
+
+Payload:
+
+```json
+{
+  "organization": 1,
+  "geodata": 1,
+  "name": "Central branch",
+  "description": "Donation point description",
+  "phone": "+7 777 000 00 02",
+  "email": "branch@example.com",
+  "working_hours": "Mon-Fri 10:00-19:00",
+  "is_active": true
+}
+```
+
+Response item includes read-only gallery fields:
+
+```json
+{
+  "id": 1,
+  "organization": 1,
+  "geodata": 1,
+  "name": "Central branch",
+  "description": "Donation point description",
+  "phone": "+7 777 000 00 02",
+  "email": "branch@example.com",
+  "working_hours": "Mon-Fri 10:00-19:00",
+  "is_active": true,
+  "images": [],
+  "images_count": 0,
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+### Branch Images
+
+```http
+GET    /api/v1/organizations/branch-images/
+GET    /api/v1/organizations/branch-images/?branch=1
+POST   /api/v1/organizations/branch-images/
+GET    /api/v1/organizations/branch-images/{id}/
+PATCH  /api/v1/organizations/branch-images/{id}/
+DELETE /api/v1/organizations/branch-images/{id}/
+```
+
+Филиал может иметь несколько изображений через отдельный `branch-images` ресурс. Для `image` используйте `multipart/form-data`. Управлять изображениями может только активный менеджер организации филиала. Читать могут все. `branch` нельзя менять после создания.
+
+Payload:
+
+```json
+{
+  "branch": 1,
+  "image": "<file>",
+  "alt_text": "Image description",
+  "sort_order": 1
+}
+```
+
 ### Events
 
 ```http
@@ -419,7 +492,7 @@ Payload:
 }
 ```
 
-Для `image` используйте `multipart/form-data`. `organization` нельзя менять после создания.
+Для одиночного legacy-поля `image` используйте `multipart/form-data`. Для галереи используйте отдельный `news-images` endpoint. `organization` нельзя менять после создания. Response новости содержит read-only поля `images`, `images_count`, `comments_count` и `views_count`.
 
 Alias для обратной совместимости:
 
@@ -428,6 +501,30 @@ Alias для обратной совместимости:
 ```
 
 Новый frontend должен использовать `/news/`.
+
+### News Images
+
+```http
+GET    /api/v1/organizations/news-images/
+GET    /api/v1/organizations/news-images/?news=1
+POST   /api/v1/organizations/news-images/
+GET    /api/v1/organizations/news-images/{id}/
+PATCH  /api/v1/organizations/news-images/{id}/
+DELETE /api/v1/organizations/news-images/{id}/
+```
+
+Новость может иметь несколько изображений через отдельный `news-images` ресурс. Для `image` используйте `multipart/form-data`. Добавлять, редактировать и удалять изображения может автор новости или активный менеджер организации. Читать могут все. `news` нельзя менять после создания.
+
+Payload:
+
+```json
+{
+  "news": 1,
+  "image": "<file>",
+  "alt_text": "Image description",
+  "sort_order": 1
+}
+```
 
 ### News Comments
 

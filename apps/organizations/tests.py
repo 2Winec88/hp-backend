@@ -15,9 +15,12 @@ from .models import (
     Event,
     EventImage,
     Organization,
+    OrganizationBranch,
+    OrganizationBranchImage,
     OrganizationMember,
     OrganizationNews,
     OrganizationNewsComment,
+    OrganizationNewsImage,
     OrganizationRegistrationRequest,
 )
 
@@ -319,7 +322,10 @@ class OrganizationAdministrationApiTests(APITestCase):
     news_url = "/api/v1/organizations/news/"
     organizations_url = "/api/v1/organizations/organizations/"
     categories_url = "/api/v1/organizations/categories/"
+    branches_url = "/api/v1/organizations/branches/"
+    branch_images_url = "/api/v1/organizations/branch-images/"
     event_images_url = "/api/v1/organizations/event-images/"
+    news_images_url = "/api/v1/organizations/news-images/"
 
     def setUp(self):
         self.user_model = get_user_model()
@@ -542,6 +548,216 @@ class OrganizationAdministrationApiTests(APITestCase):
         self.assertEqual(list_response.status_code, status.HTTP_200_OK)
         self.assertEqual(create_response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
 
+    def test_manager_can_create_branch_with_geodata(self):
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.post(
+            self.branches_url,
+            data={
+                "organization": self.organization.pk,
+                "geodata": self.geodata.pk,
+                "name": "Central Branch",
+                "description": "Main donation point",
+                "phone": "+7 777 000 00 02",
+                "email": "branch@example.com",
+                "working_hours": "Mon-Fri 10:00-19:00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        branch = OrganizationBranch.objects.get(pk=response.data["id"])
+        self.assertEqual(branch.organization, self.organization)
+        self.assertEqual(branch.geodata, self.geodata)
+        self.assertEqual(response.data["images_count"], 0)
+
+    def test_all_users_can_view_branches(self):
+        OrganizationBranch.objects.create(
+            organization=self.organization,
+            geodata=self.geodata,
+            name="Public Branch",
+            description="Visible to everyone",
+        )
+
+        response = self.client.get(self.branches_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_only_manager_can_manage_branches(self):
+        branch = OrganizationBranch.objects.create(
+            organization=self.organization,
+            geodata=self.geodata,
+            name="Protected Branch",
+            description="Managed by managers",
+        )
+
+        self.client.force_authenticate(self.member_user)
+        member_create_response = self.client.post(
+            self.branches_url,
+            data={
+                "organization": self.organization.pk,
+                "name": "Member Branch",
+            },
+            format="json",
+        )
+        self.assertEqual(member_create_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.client.force_authenticate(self.outsider)
+        outsider_patch_response = self.client.patch(
+            f"{self.branches_url}{branch.pk}/",
+            data={"name": "Outsider Edit"},
+            format="json",
+        )
+        self.assertEqual(outsider_patch_response.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(self.manager)
+        manager_patch_response = self.client.patch(
+            f"{self.branches_url}{branch.pk}/",
+            data={"name": "Manager Edit"},
+            format="json",
+        )
+        self.assertEqual(manager_patch_response.status_code, status.HTTP_200_OK)
+
+    def test_branch_organization_cannot_be_changed(self):
+        other_organization = Organization.objects.create(
+            created_by=self.manager,
+            official_name="Other Branch Org",
+            legal_address="Other Address",
+            phone="+7 777 000 00 03",
+            email="other-branch-org@example.com",
+            executive_person_full_name="Other Executive",
+            executive_authority_basis="Charter",
+            executive_body_name="Board",
+        )
+        OrganizationMember.objects.create(
+            organization=other_organization,
+            user=self.manager,
+            role=OrganizationMember.Role.MANAGER,
+        )
+        branch = OrganizationBranch.objects.create(
+            organization=self.organization,
+            name="Fixed Organization Branch",
+        )
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.patch(
+            f"{self.branches_url}{branch.pk}/",
+            data={"organization": other_organization.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        branch.refresh_from_db()
+        self.assertEqual(branch.organization, self.organization)
+
+    def test_branch_can_have_multiple_images(self):
+        branch = OrganizationBranch.objects.create(
+            organization=self.organization,
+            name="Gallery Branch",
+        )
+
+        first_image = OrganizationBranchImage.objects.create(
+            branch=branch,
+            image="first.jpg",
+            alt_text="First image",
+            sort_order=2,
+        )
+        second_image = OrganizationBranchImage.objects.create(
+            branch=branch,
+            image="second.jpg",
+            alt_text="Second image",
+            sort_order=1,
+        )
+
+        self.assertEqual(branch.images.count(), 2)
+        self.assertEqual(list(branch.images.all()), [second_image, first_image])
+
+    def test_manager_can_manage_branch_images(self):
+        branch = OrganizationBranch.objects.create(
+            organization=self.organization,
+            name="Image Branch",
+        )
+        self.client.force_authenticate(self.manager)
+
+        create_response = self.client.post(
+            self.branch_images_url,
+            data={
+                "branch": branch.pk,
+                "image": create_test_image_file("branch.gif"),
+                "alt_text": "Branch image",
+                "sort_order": 1,
+            },
+            format="multipart",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        image = OrganizationBranchImage.objects.get(pk=create_response.data["id"])
+
+        patch_response = self.client.patch(
+            f"{self.branch_images_url}{image.pk}/",
+            data={"alt_text": "Updated branch image"},
+            format="json",
+        )
+        delete_response = self.client.delete(f"{self.branch_images_url}{image.pk}/")
+
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(OrganizationBranchImage.objects.filter(pk=image.pk).exists())
+
+    def test_non_manager_cannot_manage_branch_images(self):
+        branch = OrganizationBranch.objects.create(
+            organization=self.organization,
+            name="Protected Image Branch",
+        )
+        image = OrganizationBranchImage.objects.create(
+            branch=branch,
+            image="protected.jpg",
+            alt_text="Protected",
+        )
+
+        self.client.force_authenticate(self.member_user)
+        create_response = self.client.post(
+            self.branch_images_url,
+            data={
+                "branch": branch.pk,
+                "image": create_test_image_file("member-branch.gif"),
+            },
+            format="multipart",
+        )
+        self.assertEqual(create_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        patch_response = self.client.patch(
+            f"{self.branch_images_url}{image.pk}/",
+            data={"alt_text": "Member edit"},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_branch_image_branch_cannot_be_changed(self):
+        first_branch = OrganizationBranch.objects.create(
+            organization=self.organization,
+            name="First Image Branch",
+        )
+        second_branch = OrganizationBranch.objects.create(
+            organization=self.organization,
+            name="Second Image Branch",
+        )
+        image = OrganizationBranchImage.objects.create(
+            branch=first_branch,
+            image="fixed-branch.jpg",
+        )
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.patch(
+            f"{self.branch_images_url}{image.pk}/",
+            data={"branch": second_branch.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        image.refresh_from_db()
+        self.assertEqual(image.branch, first_branch)
+
     def test_manager_can_manage_event_images(self):
         event = Event.objects.create(
             title="Gallery Event",
@@ -605,6 +821,144 @@ class OrganizationAdministrationApiTests(APITestCase):
         self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(OrganizationNews.objects.filter(pk=news.pk).exists())
+
+    def test_organization_news_can_have_multiple_images(self):
+        news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.manager_membership,
+            title="Gallery News",
+            text="News with several images",
+        )
+
+        first_image = OrganizationNewsImage.objects.create(
+            news=news,
+            image="first.jpg",
+            alt_text="First image",
+            sort_order=2,
+        )
+        second_image = OrganizationNewsImage.objects.create(
+            news=news,
+            image="second.jpg",
+            alt_text="Second image",
+            sort_order=1,
+        )
+
+        self.assertEqual(news.images.count(), 2)
+        self.assertEqual(list(news.images.all()), [second_image, first_image])
+
+    def test_news_images_api_respects_news_author_and_manager_permissions(self):
+        news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Member Gallery News",
+            text="Created by member",
+        )
+
+        self.client.force_authenticate(self.outsider)
+        outsider_response = self.client.post(
+            self.news_images_url,
+            data={
+                "news": news.pk,
+                "image": create_test_image_file("outsider.gif"),
+                "alt_text": "Forbidden",
+                "sort_order": 1,
+            },
+            format="multipart",
+        )
+        self.assertEqual(outsider_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        self.client.force_authenticate(self.member_user)
+        author_response = self.client.post(
+            self.news_images_url,
+            data={
+                "news": news.pk,
+                "image": create_test_image_file("author.gif"),
+                "alt_text": "Author image",
+                "sort_order": 1,
+            },
+            format="multipart",
+        )
+        self.assertEqual(author_response.status_code, status.HTTP_201_CREATED)
+
+        self.client.force_authenticate(self.manager)
+        manager_response = self.client.post(
+            self.news_images_url,
+            data={
+                "news": news.pk,
+                "image": create_test_image_file("manager.gif"),
+                "alt_text": "Manager image",
+                "sort_order": 2,
+            },
+            format="multipart",
+        )
+        self.assertEqual(manager_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(news.images.count(), 2)
+
+    def test_only_news_author_or_manager_can_edit_news_image(self):
+        news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Editable Gallery News",
+            text="Created by member",
+        )
+        image = OrganizationNewsImage.objects.create(
+            news=news,
+            image="editable.jpg",
+            alt_text="Initial",
+        )
+
+        self.client.force_authenticate(self.outsider)
+        outsider_response = self.client.patch(
+            f"{self.news_images_url}{image.pk}/",
+            data={"alt_text": "Outsider edit"},
+            format="json",
+        )
+        self.assertEqual(outsider_response.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(self.member_user)
+        author_response = self.client.patch(
+            f"{self.news_images_url}{image.pk}/",
+            data={"alt_text": "Author edit"},
+            format="json",
+        )
+        self.assertEqual(author_response.status_code, status.HTTP_200_OK)
+
+        self.client.force_authenticate(self.manager)
+        manager_response = self.client.patch(
+            f"{self.news_images_url}{image.pk}/",
+            data={"alt_text": "Manager edit"},
+            format="json",
+        )
+        self.assertEqual(manager_response.status_code, status.HTTP_200_OK)
+
+    def test_news_image_news_cannot_be_changed(self):
+        first_news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.manager_membership,
+            title="First Gallery News",
+            text="Text",
+        )
+        second_news = OrganizationNews.objects.create(
+            organization=self.organization,
+            created_by_member=self.manager_membership,
+            title="Second Gallery News",
+            text="Text",
+        )
+        image = OrganizationNewsImage.objects.create(
+            news=first_news,
+            image="fixed.jpg",
+        )
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.patch(
+            f"{self.news_images_url}{image.pk}/",
+            data={"news": second_news.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        image.refresh_from_db()
+        self.assertEqual(image.news, first_news)
 
 
 class OrganizationRegistrationRequestApiTests(APITestCase):

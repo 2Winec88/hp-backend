@@ -10,3 +10,4 @@
 - Если добавлены, удалены или изменены endpoints, обязательные/необязательные поля, статусы ответов, авторизация или порядок проверки сценариев, обновляй Postman-инструкцию в рамках той же задачи.
 - Если документацию не нужно менять, кратко укажи это в финальном ответе.
 - Перед финальным ответом запускай релевантные тесты и `python manage.py check`, если изменения затрагивали код.
+- Do not read `docs/geonames_data.txt` fully. It is a large GeoNames dump; inspect it only with bounded commands such as `Get-Content -TotalCount`, `Select-String`, `rg`, or streaming import scripts.

@@ -9,25 +9,34 @@ from .models import (
     Event,
     EventImage,
     Organization,
+    OrganizationBranch,
+    OrganizationBranchImage,
     OrganizationMember,
     OrganizationNews,
     OrganizationNewsComment,
+    OrganizationNewsImage,
     OrganizationRegistrationRequest,
 )
 from .permissions import (
     IsOrganizationManager,
+    IsReadOnlyOrBranchImageOrganizationManager,
+    IsReadOnlyOrBranchOrganizationManager,
     IsReadOnlyOrCommentAuthorOrOrganizationManager,
     IsReadOnlyOrEventImageAuthorOrOrganizationManager,
     IsReadOnlyOrOrganizationManager,
     IsReadOnlyOrOrganizationContentAuthorOrManager,
+    IsReadOnlyOrOrganizationNewsImageAuthorOrOrganizationManager,
     IsStaffSuperuser,
 )
 from .serializers import (
     CategorySerializer,
     EventImageSerializer,
     EventSerializer,
+    OrganizationBranchImageSerializer,
+    OrganizationBranchSerializer,
     OrganizationSerializer,
     OrganizationNewsCommentSerializer,
+    OrganizationNewsImageSerializer,
     OrganizationNewsSerializer,
     OrganizationMemberSerializer,
     OrganizationRegistrationDecisionSerializer,
@@ -110,6 +119,40 @@ class OrganizationMemberViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class OrganizationBranchViewSet(viewsets.ModelViewSet):
+    serializer_class = OrganizationBranchSerializer
+    permission_classes = [IsReadOnlyOrBranchOrganizationManager]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = OrganizationBranch.objects.select_related(
+            "organization",
+            "geodata",
+            "geodata__city",
+            "geodata__city__region",
+        ).prefetch_related("images")
+        organization_id = self.request.query_params.get("organization")
+        if organization_id:
+            queryset = queryset.filter(organization_id=organization_id)
+        return queryset
+
+
+class OrganizationBranchImageViewSet(viewsets.ModelViewSet):
+    serializer_class = OrganizationBranchImageSerializer
+    permission_classes = [IsReadOnlyOrBranchImageOrganizationManager]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = OrganizationBranchImage.objects.select_related(
+            "branch",
+            "branch__organization",
+        )
+        branch_id = self.request.query_params.get("branch")
+        if branch_id:
+            queryset = queryset.filter(branch_id=branch_id)
+        return queryset
+
+
 class OrganizationContentViewSetMixin:
     def perform_create(self, serializer):
         organization = serializer.validated_data["organization"]
@@ -163,7 +206,7 @@ class OrganizationNewsViewSet(OrganizationContentViewSetMixin, viewsets.ModelVie
             "created_by_member",
             "created_by_member__user",
             "organization",
-        )
+        ).prefetch_related("images")
         organization_id = self.request.query_params.get("organization")
         if organization_id:
             queryset = queryset.filter(organization_id=organization_id)
@@ -180,6 +223,24 @@ class OrganizationNewsViewSet(OrganizationContentViewSetMixin, viewsets.ModelVie
 
 
 EventNewsViewSet = OrganizationNewsViewSet
+
+
+class OrganizationNewsImageViewSet(viewsets.ModelViewSet):
+    serializer_class = OrganizationNewsImageSerializer
+    permission_classes = [IsReadOnlyOrOrganizationNewsImageAuthorOrOrganizationManager]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = OrganizationNewsImage.objects.select_related(
+            "news",
+            "news__organization",
+            "news__created_by_member",
+            "news__created_by_member__user",
+        )
+        news_id = self.request.query_params.get("news")
+        if news_id:
+            queryset = queryset.filter(news_id=news_id)
+        return queryset
 
 
 class OrganizationNewsCommentViewSet(viewsets.ModelViewSet):

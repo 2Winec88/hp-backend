@@ -5,9 +5,12 @@ from .models import (
     Event,
     EventImage,
     Organization,
+    OrganizationBranch,
+    OrganizationBranchImage,
     OrganizationMember,
     OrganizationNews,
     OrganizationNewsComment,
+    OrganizationNewsImage,
     OrganizationRegistrationRequest,
 )
 
@@ -61,6 +64,30 @@ class OrganizationMemberAdmin(admin.ModelAdmin):
     autocomplete_fields = ("organization", "user")
 
 
+class OrganizationBranchImageInline(admin.TabularInline):
+    model = OrganizationBranchImage
+    extra = 3
+    fields = ("image", "alt_text", "sort_order", "created_at")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(OrganizationBranch)
+class OrganizationBranchAdmin(admin.ModelAdmin):
+    list_display = ("name", "organization", "phone", "email", "is_active", "created_at")
+    list_filter = ("is_active", "created_at")
+    search_fields = ("name", "description", "organization__official_name", "phone", "email")
+    autocomplete_fields = ("organization", "geodata")
+    inlines = (OrganizationBranchImageInline,)
+
+
+@admin.register(OrganizationBranchImage)
+class OrganizationBranchImageAdmin(admin.ModelAdmin):
+    list_display = ("branch", "image", "sort_order", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("branch__name", "branch__organization__official_name", "alt_text", "image")
+    autocomplete_fields = ("branch",)
+
+
 class EventImageInline(admin.TabularInline):
     model = EventImage
     extra = 3
@@ -86,12 +113,28 @@ class EventImageAdmin(admin.ModelAdmin):
     autocomplete_fields = ("event",)
 
 
+class OrganizationNewsImageInline(admin.TabularInline):
+    model = OrganizationNewsImage
+    extra = 3
+    fields = ("image", "alt_text", "sort_order", "created_at")
+    readonly_fields = ("created_at",)
+
+
 @admin.register(OrganizationNews)
 class OrganizationNewsAdmin(admin.ModelAdmin):
     list_display = ("title", "organization", "created_by_member", "views_count", "created_at", "updated_at")
     list_filter = ("created_at", "updated_at")
     search_fields = ("title", "text", "organization__official_name", "created_by_member__user__email")
     autocomplete_fields = ("organization", "created_by_member")
+    inlines = (OrganizationNewsImageInline,)
+
+
+@admin.register(OrganizationNewsImage)
+class OrganizationNewsImageAdmin(admin.ModelAdmin):
+    list_display = ("news", "image", "sort_order", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("news__title", "alt_text", "image")
+    autocomplete_fields = ("news",)
 
 
 @admin.register(OrganizationNewsComment)
