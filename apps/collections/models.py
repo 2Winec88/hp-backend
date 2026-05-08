@@ -335,3 +335,208 @@ class CourierProfile(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.car_name}"
+
+
+class Poll(models.Model):
+    class Kind(models.TextChoices):
+        TEXT = "text", "Text"
+        DATE = "date", "Date"
+        PLACE = "place", "Place"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        OPEN = "open", "Open"
+        CLOSED = "closed", "Closed"
+
+    donor_group = models.ForeignKey(
+        DonorGroup,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="polls",
+    )
+    news = models.ForeignKey(
+        "organizations.OrganizationNews",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="polls",
+    )
+    created_by_member = models.ForeignKey(
+        "organizations.OrganizationMember",
+        on_delete=models.CASCADE,
+        related_name="created_polls",
+    )
+    source_poll = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reposted_polls",
+    )
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.TEXT)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    closes_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Poll"
+        verbose_name_plural = "Polls"
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def organization(self):
+        if self.donor_group_id:
+            return self.donor_group.collection.organization
+        if self.news_id:
+            return self.news.organization
+        return None
+
+    def clean(self):
+        super().clean()
+        if not self.donor_group_id and not self.news_id:
+            raise ValidationError("Poll must be attached to a donor group or news.")
+        if self.donor_group_id and self.news_id:
+            donor_group_org_id = self.donor_group.collection.organization_id
+            if self.news.organization_id != donor_group_org_id:
+                raise ValidationError(
+                    {"news": "News must belong to the donor group collection organization."}
+                )
+        organization = self.organization
+        if (
+            self.created_by_member_id
+            and organization
+            and self.created_by_member.organization_id != organization.id
+        ):
+            raise ValidationError(
+                {"created_by_member": "Creator must be a member of the poll organization."}
+            )
+
+
+class MeetingPlaceProposal(models.Model):
+    donor_group = models.ForeignKey(
+        DonorGroup,
+        on_delete=models.CASCADE,
+        related_name="place_proposals",
+    )
+    proposed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="meeting_place_proposals",
+    )
+    geodata = models.ForeignKey(
+        "common.GeoData",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="meeting_place_proposals",
+    )
+    street = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Meeting place proposal"
+        verbose_name_plural = "Meeting place proposals"
+        ordering = ("donor_group", "-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.donor_group} - {self.street or self.geodata_id or self.pk}"
+
+
+class PollOption(models.Model):
+    poll = models.ForeignKey(
+        Poll,
+        on_delete=models.CASCADE,
+        related_name="options",
+    )
+    text = models.CharField(max_length=255, blank=True)
+    starts_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    geodata = models.ForeignKey(
+        "common.GeoData",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="poll_options",
+    )
+    place_street = models.CharField(max_length=255, blank=True)
+    place_description = models.TextField(blank=True)
+    source_place_proposal = models.ForeignKey(
+        MeetingPlaceProposal,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="poll_options",
+    )
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Poll option"
+        verbose_name_plural = "Poll options"
+        ordering = ("poll", "sort_order", "id")
+
+    def __str__(self):
+        return self.text or self.place_street or f"Poll option #{self.pk}"
+
+    def clean(self):
+        super().clean()
+        if self.starts_at and self.ends_at and self.ends_at < self.starts_at:
+            raise ValidationError({"ends_at": "End date cannot be earlier than start date."})
+        if self.poll_id:
+            if self.poll.kind == Poll.Kind.TEXT and not self.text:
+                raise ValidationError({"text": "Text option requires text."})
+            if self.poll.kind == Poll.Kind.DATE and not self.starts_at:
+                raise ValidationError({"starts_at": "Date option requires starts_at."})
+            if self.poll.kind == Poll.Kind.PLACE and not (
+                self.geodata_id or self.place_street or self.place_description
+            ):
+                raise ValidationError({"geodata": "Place option requires place data."})
+
+
+class PollVote(models.Model):
+    poll = models.ForeignKey(
+        Poll,
+        on_delete=models.CASCADE,
+        related_name="votes",
+    )
+    option = models.ForeignKey(
+        PollOption,
+        on_delete=models.CASCADE,
+        related_name="votes",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="poll_votes",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Poll vote"
+        verbose_name_plural = "Poll votes"
+        ordering = ("poll", "created_at", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("poll", "user"),
+                name="unique_poll_vote_per_user",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user} -> {self.option}"
+
+    def clean(self):
+        super().clean()
+        if self.option_id and self.poll_id and self.option.poll_id != self.poll_id:
+            raise ValidationError({"option": "Option must belong to the selected poll."})

@@ -12,11 +12,17 @@ from .models import (
     DonorGroupItem,
     DonorGroupMember,
     ItemCategory,
+    MeetingPlaceProposal,
+    Poll,
+    PollOption,
+    PollVote,
     UserItem,
 )
 from .permissions import (
+    is_donor_group_member,
     is_collection_author_or_manager,
     is_donor_group_collection_author_or_manager,
+    is_poll_manager,
 )
 
 
@@ -350,3 +356,266 @@ class CourierProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "user", "user_email", "created_at", "updated_at")
+
+
+class MeetingPlaceProposalSerializer(serializers.ModelSerializer):
+    proposed_by_email = serializers.EmailField(source="proposed_by.email", read_only=True)
+
+    class Meta:
+        model = MeetingPlaceProposal
+        fields = (
+            "id",
+            "donor_group",
+            "proposed_by",
+            "proposed_by_email",
+            "geodata",
+            "street",
+            "description",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "proposed_by", "proposed_by_email", "created_at", "updated_at")
+
+    def validate_donor_group(self, donor_group):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not is_donor_group_member(donor_group=donor_group, user=user):
+            raise serializers.ValidationError("Only donor group members can propose meeting places.")
+        return donor_group
+
+    def validate(self, attrs):
+        if self.instance and "donor_group" in attrs and attrs["donor_group"] != self.instance.donor_group:
+            raise serializers.ValidationError({"donor_group": "Donor group cannot be changed."})
+        geodata = attrs.get("geodata", getattr(self.instance, "geodata", None))
+        street = attrs.get("street", getattr(self.instance, "street", ""))
+        description = attrs.get("description", getattr(self.instance, "description", ""))
+        if not (geodata or street or description):
+            raise serializers.ValidationError(
+                {"geodata": "Meeting place proposal requires place data."}
+            )
+        return attrs
+
+
+class PollOptionSerializer(serializers.ModelSerializer):
+    votes_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PollOption
+        fields = (
+            "id",
+            "poll",
+            "text",
+            "starts_at",
+            "ends_at",
+            "geodata",
+            "place_street",
+            "place_description",
+            "source_place_proposal",
+            "sort_order",
+            "votes_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "votes_count", "created_at", "updated_at")
+
+    def get_votes_count(self, obj):
+        votes_count = getattr(obj, "votes_count", None)
+        if votes_count is not None:
+            return votes_count
+        return obj.votes.count()
+
+    def validate_poll(self, poll):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not is_poll_manager(poll=poll, user=user):
+            raise serializers.ValidationError("Only the poll organizer or manager can manage options.")
+        return poll
+
+    def validate(self, attrs):
+        if self.instance and "poll" in attrs and attrs["poll"] != self.instance.poll:
+            raise serializers.ValidationError({"poll": "Poll cannot be changed."})
+        poll = attrs.get("poll", getattr(self.instance, "poll", None))
+        source_place_proposal = attrs.get(
+            "source_place_proposal",
+            getattr(self.instance, "source_place_proposal", None),
+        )
+        if (
+            poll
+            and source_place_proposal
+            and poll.donor_group_id != source_place_proposal.donor_group_id
+        ):
+            raise serializers.ValidationError(
+                {"source_place_proposal": "Proposal must belong to the poll donor group."}
+            )
+        if poll:
+            self._validate_by_kind(poll=poll, attrs=attrs)
+        return attrs
+
+    def _validate_by_kind(self, *, poll, attrs):
+        text = attrs.get("text", getattr(self.instance, "text", ""))
+        starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
+        ends_at = attrs.get("ends_at", getattr(self.instance, "ends_at", None))
+        geodata = attrs.get("geodata", getattr(self.instance, "geodata", None))
+        place_street = attrs.get("place_street", getattr(self.instance, "place_street", ""))
+        place_description = attrs.get(
+            "place_description",
+            getattr(self.instance, "place_description", ""),
+        )
+        if poll.kind == Poll.Kind.TEXT and not text:
+            raise serializers.ValidationError({"text": "Text option requires text."})
+        if poll.kind == Poll.Kind.DATE and not starts_at:
+            raise serializers.ValidationError({"starts_at": "Date option requires starts_at."})
+        if starts_at and ends_at and ends_at < starts_at:
+            raise serializers.ValidationError(
+                {"ends_at": "End date cannot be earlier than start date."}
+            )
+        if poll.kind == Poll.Kind.PLACE and not (geodata or place_street or place_description):
+            raise serializers.ValidationError({"geodata": "Place option requires place data."})
+
+
+class PollSerializer(serializers.ModelSerializer):
+    created_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
+    options = PollOptionSerializer(many=True, read_only=True)
+    options_count = serializers.SerializerMethodField()
+    votes_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Poll
+        fields = (
+            "id",
+            "donor_group",
+            "news",
+            "created_by_member",
+            "source_poll",
+            "title",
+            "description",
+            "kind",
+            "status",
+            "closes_at",
+            "options",
+            "options_count",
+            "votes_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "created_by_member",
+            "source_poll",
+            "options",
+            "options_count",
+            "votes_count",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_options_count(self, obj):
+        return obj.options.count()
+
+    def get_votes_count(self, obj):
+        return obj.votes.count()
+
+    def validate(self, attrs):
+        if self.instance:
+            if "donor_group" in attrs and attrs["donor_group"] != self.instance.donor_group:
+                raise serializers.ValidationError({"donor_group": "Donor group cannot be changed."})
+            if "news" in attrs and attrs["news"] != self.instance.news:
+                raise serializers.ValidationError({"news": "News cannot be changed."})
+
+        donor_group = attrs.get("donor_group", getattr(self.instance, "donor_group", None))
+        news = attrs.get("news", getattr(self.instance, "news", None))
+        if not donor_group and not news:
+            raise serializers.ValidationError("Poll must be attached to a donor group or news.")
+        if donor_group and news and donor_group.collection.organization_id != news.organization_id:
+            raise serializers.ValidationError(
+                {"news": "News must belong to the donor group collection organization."}
+            )
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if donor_group and not is_donor_group_collection_author_or_manager(
+            donor_group=donor_group,
+            user=user,
+        ):
+            raise serializers.ValidationError(
+                "Only the collection author or manager can manage donor group polls."
+            )
+        if news and not (
+            news.created_by_member.user_id == getattr(user, "id", None)
+            and news.created_by_member.is_active
+        ) and not is_active_organization_manager(organization=news.organization, user=user):
+            raise serializers.ValidationError(
+                "Only the news author or organization manager can manage news polls."
+            )
+        return attrs
+
+
+class PollVoteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PollVote
+        fields = (
+            "id",
+            "poll",
+            "option",
+            "user",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "user", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        if self.instance and "poll" in attrs and attrs["poll"] != self.instance.poll:
+            raise serializers.ValidationError({"poll": "Poll cannot be changed."})
+        poll = attrs.get("poll", getattr(self.instance, "poll", None))
+        option = attrs.get("option", getattr(self.instance, "option", None))
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if poll and poll.status != Poll.Status.OPEN:
+            raise serializers.ValidationError({"poll": "Only open polls accept votes."})
+        if poll and option and option.poll_id != poll.id:
+            raise serializers.ValidationError({"option": "Option must belong to the selected poll."})
+        if poll and poll.donor_group_id and not is_donor_group_member(
+            donor_group=poll.donor_group,
+            user=user,
+        ):
+            raise serializers.ValidationError(
+                "Only donor group members can vote in donor group polls."
+            )
+        if poll and user and not self.instance and PollVote.objects.filter(
+            poll=poll,
+            user=user,
+        ).exists():
+            raise serializers.ValidationError({"poll": "User has already voted in this poll."})
+        return attrs
+
+
+class PollRepostSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=200, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    status = serializers.ChoiceField(choices=Poll.Status.choices, default=Poll.Status.OPEN)
+    closes_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class PlaceProposalPollCreateSerializer(serializers.Serializer):
+    donor_group = serializers.PrimaryKeyRelatedField(queryset=DonorGroup.objects.all())
+    title = serializers.CharField(max_length=200)
+    description = serializers.CharField(required=False, allow_blank=True)
+    status = serializers.ChoiceField(choices=Poll.Status.choices, default=Poll.Status.OPEN)
+    closes_at = serializers.DateTimeField(required=False, allow_null=True)
+    proposal_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=False,
+    )
+
+    def validate_donor_group(self, donor_group):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not is_donor_group_collection_author_or_manager(
+            donor_group=donor_group,
+            user=user,
+        ):
+            raise serializers.ValidationError(
+                "Only the collection author or manager can create proposal polls."
+            )
+        return donor_group

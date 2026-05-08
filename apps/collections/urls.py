@@ -10,6 +10,10 @@ from .views import (
     DonorGroupMemberViewSet,
     DonorGroupViewSet,
     ItemCategoryViewSet,
+    MeetingPlaceProposalViewSet,
+    PollOptionViewSet,
+    PollViewSet,
+    PollVoteViewSet,
     UserItemViewSet,
 )
 
@@ -23,6 +27,10 @@ router.register("donor-groups", DonorGroupViewSet, basename="donor-group")
 router.register("donor-group-members", DonorGroupMemberViewSet, basename="donor-group-member")
 router.register("donor-group-items", DonorGroupItemViewSet, basename="donor-group-item")
 router.register("courier-profiles", CourierProfileViewSet, basename="courier-profile")
+router.register("meeting-place-proposals", MeetingPlaceProposalViewSet, basename="meeting-place-proposal")
+router.register("polls", PollViewSet, basename="poll")
+router.register("poll-options", PollOptionViewSet, basename="poll-option")
+router.register("poll-votes", PollVoteViewSet, basename="poll-vote")
 
 urlpatterns = [
     path("", include(router.urls)),

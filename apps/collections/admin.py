@@ -10,6 +10,10 @@ from .models import (
     DonorGroupMember,
     Item,
     ItemCategory,
+    MeetingPlaceProposal,
+    Poll,
+    PollOption,
+    PollVote,
     UserItem,
 )
 
@@ -100,3 +104,38 @@ class CourierProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "car_name", "created_at")
     search_fields = ("user__email", "car_name")
     autocomplete_fields = ("user",)
+
+
+class PollOptionInline(admin.TabularInline):
+    model = PollOption
+    extra = 0
+
+
+@admin.register(Poll)
+class PollAdmin(admin.ModelAdmin):
+    list_display = ("title", "kind", "status", "donor_group", "news", "created_at")
+    list_filter = ("kind", "status", "created_at")
+    search_fields = ("title", "description", "donor_group__title", "news__title")
+    autocomplete_fields = ("donor_group", "news", "created_by_member", "source_poll")
+    inlines = (PollOptionInline,)
+
+
+@admin.register(PollOption)
+class PollOptionAdmin(admin.ModelAdmin):
+    list_display = ("poll", "text", "starts_at", "geodata", "sort_order")
+    search_fields = ("poll__title", "text", "place_street", "place_description")
+    autocomplete_fields = ("poll", "geodata", "source_place_proposal")
+
+
+@admin.register(PollVote)
+class PollVoteAdmin(admin.ModelAdmin):
+    list_display = ("poll", "option", "user", "created_at")
+    search_fields = ("poll__title", "user__email")
+    autocomplete_fields = ("poll", "option", "user")
+
+
+@admin.register(MeetingPlaceProposal)
+class MeetingPlaceProposalAdmin(admin.ModelAdmin):
+    list_display = ("donor_group", "proposed_by", "street", "geodata", "created_at")
+    search_fields = ("donor_group__title", "proposed_by__email", "street", "description")
+    autocomplete_fields = ("donor_group", "proposed_by", "geodata")

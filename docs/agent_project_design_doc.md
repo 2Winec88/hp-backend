@@ -516,7 +516,8 @@ Current implementation note, 2026-05-08:
 - Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items, courier profiles.
 - Donor group invitations are implemented through `communications.Invitation` with `target_type="donor_group"`.
 - Push delivery is implemented as an additional `Notification` delivery channel.
-- Remaining major collection work: transfer lifecycle, chats, voting, courier assignment workflow, video reports.
+- Voting base is implemented: text/date/place polls, poll options, one vote per user per poll, meeting place proposals, place-poll creation from proposals, poll reposting without zero-vote options, and push notifications for new open donor group polls.
+- Remaining major collection work: transfer lifecycle, chats, final poll-result selection, courier assignment workflow, video reports.
 
 Приоритетные направления:
 

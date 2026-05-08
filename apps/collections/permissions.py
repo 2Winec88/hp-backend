@@ -24,6 +24,31 @@ def is_donor_group_collection_author_or_manager(*, donor_group, user):
     )
 
 
+def is_donor_group_member(*, donor_group, user):
+    if not user or not user.is_authenticated:
+        return False
+    return donor_group.members.filter(user=user).exists()
+
+
+def is_poll_manager(*, poll, user):
+    if poll.donor_group_id:
+        return is_donor_group_collection_author_or_manager(
+            donor_group=poll.donor_group,
+            user=user,
+        )
+    if poll.news_id:
+        if not user or not user.is_authenticated:
+            return False
+        return is_active_organization_manager(
+            organization=poll.news.organization,
+            user=user,
+        ) or (
+            poll.news.created_by_member.user_id == user.id
+            and poll.news.created_by_member.is_active
+        )
+    return False
+
+
 class IsReadOnlyOrUserItemOwner(BasePermission):
     message = "Only the item owner can edit this user item."
 
@@ -152,5 +177,66 @@ class IsReadOnlyOrCourierProfileOwner(BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in SAFE_METHODS:
             return True
+        user = request.user
+        return bool(user and user.is_authenticated and obj.user_id == user.id)
+
+
+class IsReadOnlyOrPollManager(BasePermission):
+    message = "Only the poll organizer or an organization manager can edit this poll."
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        return is_poll_manager(poll=obj, user=request.user)
+
+
+class IsReadOnlyOrPollOptionManager(BasePermission):
+    message = "Only the poll organizer or an organization manager can edit poll options."
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        return is_poll_manager(poll=obj.poll, user=request.user)
+
+
+class IsReadOnlyOrMeetingPlaceProposalOwnerOrGroupManager(BasePermission):
+    message = "Only the proposal author or group manager can edit this proposal."
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        user = request.user
+        if obj.proposed_by_id == getattr(user, "id", None):
+            return True
+        return is_donor_group_collection_author_or_manager(
+            donor_group=obj.donor_group,
+            user=user,
+        )
+
+
+class IsPollVoteOwner(BasePermission):
+    message = "Only the voter can edit this vote."
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return bool(request.user and request.user.is_authenticated)
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
         user = request.user
         return bool(user and user.is_authenticated and obj.user_id == user.id)

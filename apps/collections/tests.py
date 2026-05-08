@@ -9,6 +9,8 @@ from apps.organizations.models import (
     OrganizationBranch,
     OrganizationMember,
 )
+from apps.communications.models import Notification
+from apps.common.models import GeoData
 
 from .models import (
     BranchItem,
@@ -19,6 +21,10 @@ from .models import (
     DonorGroupItem,
     DonorGroupMember,
     ItemCategory,
+    MeetingPlaceProposal,
+    Poll,
+    PollOption,
+    PollVote,
     UserItem,
 )
 
@@ -455,3 +461,160 @@ class CollectionPermissionTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         courier_profile.refresh_from_db()
         self.assertEqual(courier_profile.car_name, "Lada Largus")
+
+    def test_group_member_can_propose_meeting_place_and_manager_creates_place_poll(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.other)
+        geodata = GeoData.objects.create(street="Lenina, 1")
+
+        self.client.force_authenticate(user=self.donor)
+        proposal_response = self.client.post(
+            reverse("meeting-place-proposal-list"),
+            {
+                "donor_group": donor_group.id,
+                "geodata": geodata.id,
+                "street": "Lenina, 1",
+                "description": "Near entrance",
+            },
+        )
+        self.assertEqual(proposal_response.status_code, status.HTTP_201_CREATED)
+
+        self.client.force_authenticate(user=self.manager)
+        poll_response = self.client.post(
+            reverse("poll-from-place-proposals"),
+            {
+                "donor_group": donor_group.id,
+                "title": "Meeting place",
+                "proposal_ids": [proposal_response.data["id"]],
+            },
+            format="json",
+        )
+
+        self.assertEqual(poll_response.status_code, status.HTTP_201_CREATED)
+        poll = Poll.objects.get(pk=poll_response.data["id"])
+        self.assertEqual(poll.kind, Poll.Kind.PLACE)
+        self.assertEqual(poll.options.count(), 1)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.donor,
+                payload__target_type="poll",
+                payload__target_id=poll.id,
+            ).exists()
+        )
+
+    def test_non_member_cannot_propose_meeting_place_or_vote_in_group_poll(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        poll = Poll.objects.create(
+            donor_group=donor_group,
+            created_by_member=self.member_membership,
+            title="Question",
+            kind=Poll.Kind.TEXT,
+        )
+        option = PollOption.objects.create(poll=poll, text="Yes")
+
+        self.client.force_authenticate(user=self.donor)
+        proposal_response = self.client.post(
+            reverse("meeting-place-proposal-list"),
+            {
+                "donor_group": donor_group.id,
+                "street": "No access",
+            },
+        )
+        vote_response = self.client.post(
+            reverse("poll-vote-list"),
+            {
+                "poll": poll.id,
+                "option": option.id,
+            },
+        )
+
+        self.assertEqual(proposal_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(vote_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_group_member_cannot_create_empty_meeting_place_proposal(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+
+        self.client.force_authenticate(user=self.donor)
+        response = self.client.post(
+            reverse("meeting-place-proposal-list"),
+            {"donor_group": donor_group.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_group_member_can_vote_once_and_repost_keeps_only_voted_options(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+        poll = Poll.objects.create(
+            donor_group=donor_group,
+            created_by_member=self.member_membership,
+            title="Question",
+            kind=Poll.Kind.TEXT,
+        )
+        voted_option = PollOption.objects.create(poll=poll, text="Keep", sort_order=0)
+        PollOption.objects.create(poll=poll, text="Drop", sort_order=1)
+
+        self.client.force_authenticate(user=self.donor)
+        vote_response = self.client.post(
+            reverse("poll-vote-list"),
+            {
+                "poll": poll.id,
+                "option": voted_option.id,
+            },
+        )
+        duplicate_response = self.client.post(
+            reverse("poll-vote-list"),
+            {
+                "poll": poll.id,
+                "option": voted_option.id,
+            },
+        )
+
+        self.assertEqual(vote_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(duplicate_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(PollVote.objects.filter(poll=poll, user=self.donor).count(), 1)
+
+        self.client.force_authenticate(user=self.member)
+        repost_response = self.client.post(
+            reverse("poll-repost", args=(poll.id,)),
+            {"title": "Second round"},
+        )
+
+        self.assertEqual(repost_response.status_code, status.HTTP_201_CREATED)
+        new_poll = Poll.objects.get(pk=repost_response.data["id"])
+        self.assertEqual(new_poll.source_poll, poll)
+        self.assertEqual(list(new_poll.options.values_list("text", flat=True)), ["Keep"])

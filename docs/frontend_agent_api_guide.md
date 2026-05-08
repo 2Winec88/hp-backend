@@ -647,9 +647,16 @@ Current API note:
 - Collection author or active organization manager manages collections, collection items, donor groups, donor group members, and donor group items.
 - Active organization manager manages branch items.
 - Donor group invitations use `/api/v1/communications/invitations/` with `target_type="donor_group"`.
+- Poll endpoints are available under `/api/v1/collections/polls/`, `/poll-options/`, `/poll-votes/`, and `/meeting-place-proposals/`.
+- Poll kinds are `text`, `date`, and `place`; poll statuses are `draft`, `open`, and `closed`.
+- Donor group members can submit meeting place proposals and vote in donor group polls.
+- Collection authors and organization managers create donor group polls, repost polls without zero-vote options, and create place polls from meeting place proposals.
+- News authors and organization managers can attach polls to news.
+- New open donor group polls create notification records and push delivery tasks for donor group members.
 - Push notification guide: `docs/push_notifications.md`.
 
-Приложение `collections` пока не имеет публичного REST API. В коде есть начальные модели справочника вещей, но сборы, донорские группы, голосования, передачи вещей и видеоотчеты еще не реализованы как frontend API.
+The `collections` app has a public REST API now. Transfer lifecycle, chats, final poll-result selection, courier assignment workflow, and video reports are still future work.
+
 
 ## Frontend Rules
 
