@@ -55,6 +55,88 @@ class Notification(models.Model):
         self.save(update_fields=("is_read", "read_at"))
 
 
+class UserDevice(models.Model):
+    class Provider(models.TextChoices):
+        FCM = "fcm", "Firebase Cloud Messaging"
+        APNS = "apns", "Apple Push Notification service"
+        WEBPUSH = "webpush", "Web Push"
+        CUSTOM = "custom", "Custom"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="devices",
+    )
+    provider = models.CharField(
+        max_length=20,
+        choices=Provider.choices,
+        default=Provider.FCM,
+    )
+    token = models.TextField()
+    device_id = models.CharField(max_length=255, blank=True)
+    platform = models.CharField(max_length=50, blank=True)
+    app_version = models.CharField(max_length=50, blank=True)
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "user_devices"
+        ordering = ("-updated_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("provider", "token"),
+                name="unique_push_provider_token",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user} - {self.provider} ({self.platform or 'unknown'})"
+
+
+class NotificationDelivery(models.Model):
+    class Channel(models.TextChoices):
+        EMAIL = "email", "Email"
+        PUSH = "push", "Push"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SENT = "sent", "Sent"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+
+    notification = models.ForeignKey(
+        Notification,
+        on_delete=models.CASCADE,
+        related_name="deliveries",
+    )
+    channel = models.CharField(max_length=20, choices=Channel.choices)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    device = models.ForeignKey(
+        UserDevice,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notification_deliveries",
+    )
+    error = models.TextField(blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "notification_deliveries"
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.notification_id} - {self.channel} - {self.status}"
+
+
 class Invitation(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

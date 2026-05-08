@@ -550,6 +550,11 @@ Payload:
 
 ## Communications
 
+Current communications note:
+
+- Invitations support `target_type="organization"` and `target_type="donor_group"`.
+- Push notifications are documented in `docs/push_notifications.md`.
+
 ### Notifications
 
 ```http
@@ -631,6 +636,18 @@ Authorization: Bearer <access_token>
 Текущий endpoint служит health-check. Полноценные чаты и live notifications будут добавляться отдельно. REST и база остаются источником истины; WebSocket не должен быть единственным способом получить важные данные.
 
 ## Collections
+
+Current API note:
+
+- Detailed guide: `docs/collections_api.md`.
+- Base prefix: `/api/v1/collections/`.
+- Public read endpoints exist for item categories, user items, collections, collection items, branch items, donor groups, donor group members, donor group items, and courier profiles.
+- Authenticated users create their own `user-items` and `courier-profiles`.
+- Active organization members create collections.
+- Collection author or active organization manager manages collections, collection items, donor groups, donor group members, and donor group items.
+- Active organization manager manages branch items.
+- Donor group invitations use `/api/v1/communications/invitations/` with `target_type="donor_group"`.
+- Push notification guide: `docs/push_notifications.md`.
 
 Приложение `collections` пока не имеет публичного REST API. В коде есть начальные модели справочника вещей, но сборы, донорские группы, голосования, передачи вещей и видеоотчеты еще не реализованы как frontend API.
 

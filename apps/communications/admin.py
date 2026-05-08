@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Invitation, Notification
+from .models import Invitation, Notification, NotificationDelivery, UserDevice
 
 
 @admin.register(Notification)
@@ -10,6 +10,24 @@ class NotificationAdmin(admin.ModelAdmin):
     search_fields = ("recipient__email", "actor__email", "title", "body")
     autocomplete_fields = ("recipient", "actor")
     readonly_fields = ("created_at", "read_at", "email_sent_at")
+
+
+@admin.register(UserDevice)
+class UserDeviceAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "provider", "platform", "is_active", "updated_at")
+    list_filter = ("provider", "platform", "is_active", "created_at")
+    search_fields = ("user__email", "token", "device_id")
+    autocomplete_fields = ("user",)
+    readonly_fields = ("created_at", "updated_at", "last_seen_at")
+
+
+@admin.register(NotificationDelivery)
+class NotificationDeliveryAdmin(admin.ModelAdmin):
+    list_display = ("id", "notification", "channel", "status", "device", "sent_at", "created_at")
+    list_filter = ("channel", "status", "created_at", "sent_at")
+    search_fields = ("notification__title", "notification__recipient__email", "error")
+    autocomplete_fields = ("notification", "device")
+    readonly_fields = ("created_at", "updated_at", "sent_at")
 
 
 @admin.register(Invitation)

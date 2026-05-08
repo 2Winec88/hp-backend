@@ -9,7 +9,6 @@ class RegionSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "name",
-            "geoname_id",
             "latitude",
             "longitude",
             "country_code",
@@ -27,7 +26,6 @@ class CitySerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "name",
-            "geoname_id",
             "latitude",
             "longitude",
             "country_code",

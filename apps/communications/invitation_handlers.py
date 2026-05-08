@@ -1,6 +1,8 @@
 from django.contrib.contenttypes.models import ContentType
 from rest_framework.exceptions import ValidationError
 
+from apps.collections.models import DonorGroup, DonorGroupMember
+from apps.collections.permissions import is_collection_author_or_manager
 from apps.organizations.models import Organization, OrganizationMember
 
 
@@ -58,6 +60,40 @@ class OrganizationInvitationHandler:
         )
 
 
+class DonorGroupInvitationHandler:
+    target_type = "donor_group"
+    model = DonorGroup
+    allowed_roles = {"member"}
+
+    def can_invite(self, *, inviter, target):
+        return is_collection_author_or_manager(
+            collection=target.collection,
+            user=inviter,
+        )
+
+    def is_member(self, *, user, target):
+        return DonorGroupMember.objects.filter(
+            donor_group=target,
+            user=user,
+        ).exists()
+
+    def create_membership(self, *, user, target, role):
+        return DonorGroupMember.objects.get_or_create(
+            donor_group=target,
+            user=user,
+        )
+
+    def get_notification_title(self, *, target, role):
+        return f"Invitation to donor group {target.pk}"
+
+    def get_notification_body(self, *, inviter, target, role):
+        collection_title = target.collection.title
+        return (
+            f"{inviter.get_full_name() or inviter.email} invited you to join "
+            f"the donor group for {collection_title}."
+        )
+
+
 class InvitationHandlerRegistry:
     def __init__(self):
         self._handlers = {}
@@ -94,3 +130,4 @@ class InvitationHandlerRegistry:
 
 invitation_handlers = InvitationHandlerRegistry()
 invitation_handlers.register(OrganizationInvitationHandler())
+invitation_handlers.register(DonorGroupInvitationHandler())

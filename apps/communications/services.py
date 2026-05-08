@@ -4,7 +4,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .invitation_handlers import invitation_handlers
 from .models import Invitation, Notification
-from .tasks import send_notification_delivery
+from .tasks import send_notification_delivery, send_notification_push_delivery
 
 
 def create_notification(
@@ -16,6 +16,7 @@ def create_notification(
     body="",
     payload=None,
     send_email=False,
+    send_push=False,
 ):
     notification = Notification.objects.create(
         recipient=recipient,
@@ -30,6 +31,10 @@ def create_notification(
         transaction.on_commit(
             lambda: send_notification_delivery.delay(notification.pk)
         )
+    if send_push:
+        transaction.on_commit(
+            lambda: send_notification_push_delivery.delay(notification.pk)
+        )
 
     return notification
 
@@ -43,6 +48,7 @@ def create_invitation(
     invited_by,
     role,
     send_email=True,
+    send_push=True,
     expires_at=None,
 ):
     handler = invitation_handlers.get_by_target_type(target_type)
@@ -73,6 +79,7 @@ def create_invitation(
             "role": role,
         },
         send_email=send_email,
+        send_push=send_push,
     )
 
     try:

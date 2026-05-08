@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
 from .invitation_handlers import invitation_handlers
-from .models import Invitation, Notification
+from .models import Invitation, Notification, NotificationDelivery, UserDevice
 from .services import create_invitation, create_notification
 
 
@@ -42,6 +42,52 @@ class NotificationSerializer(serializers.ModelSerializer):
         )
 
 
+class UserDeviceSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = UserDevice
+        fields = (
+            "id",
+            "user",
+            "user_email",
+            "provider",
+            "token",
+            "device_id",
+            "platform",
+            "app_version",
+            "is_active",
+            "last_seen_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "user",
+            "user_email",
+            "last_seen_at",
+            "created_at",
+            "updated_at",
+        )
+
+
+class NotificationDeliverySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationDelivery
+        fields = (
+            "id",
+            "notification",
+            "channel",
+            "status",
+            "device",
+            "error",
+            "sent_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
 class NotificationCreateSerializer(serializers.Serializer):
     recipient = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
     type = serializers.ChoiceField(
@@ -56,6 +102,18 @@ class NotificationCreateSerializer(serializers.Serializer):
     body = serializers.CharField(required=False, allow_blank=True)
     payload = serializers.JSONField(required=False)
     send_email = serializers.BooleanField(default=False)
+    send_push = serializers.BooleanField(default=False)
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        user = request.user
+        if (attrs.get("send_email") or attrs.get("send_push")) and not (
+            user.is_staff and user.is_superuser
+        ):
+            raise serializers.ValidationError(
+                "Only staff superusers can request external notification delivery."
+            )
+        return attrs
 
     def create(self, validated_data):
         request = self.context["request"]
@@ -67,6 +125,7 @@ class NotificationCreateSerializer(serializers.Serializer):
             body=validated_data.get("body", ""),
             payload=validated_data.get("payload") or {},
             send_email=validated_data["send_email"],
+            send_push=validated_data["send_push"],
         )
 
 
@@ -108,6 +167,7 @@ class InvitationCreateSerializer(serializers.Serializer):
     invited_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
     role = serializers.CharField(default="member", max_length=30)
     send_email = serializers.BooleanField(default=True)
+    send_push = serializers.BooleanField(default=True)
     expires_at = serializers.DateTimeField(required=False)
 
     def create(self, validated_data):
@@ -119,5 +179,6 @@ class InvitationCreateSerializer(serializers.Serializer):
             invited_by=request.user,
             role=validated_data["role"],
             send_email=validated_data["send_email"],
+            send_push=validated_data["send_push"],
             expires_at=validated_data.get("expires_at"),
         )

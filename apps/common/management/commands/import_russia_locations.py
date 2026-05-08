@@ -91,7 +91,6 @@ class Command(BaseCommand):
                 name=name,
                 country_code=country_code,
                 defaults={
-                    "geoname_id": None,
                     "latitude": None,
                     "longitude": None,
                 },
@@ -120,7 +119,6 @@ class Command(BaseCommand):
                 region=region,
                 country_code=country_code,
                 defaults={
-                    "geoname_id": None,
                     "latitude": self._coordinate(coords.get("lat")),
                     "longitude": self._coordinate(coords.get("lon")),
                 },

@@ -4,10 +4,12 @@ from django.test import SimpleTestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.collections.models import Collection, DonorGroup, DonorGroupMember
 from apps.organizations.models import Organization, OrganizationMember
 from hp_backend.asgi import application
 
-from .models import Invitation, Notification
+from .models import Invitation, Notification, NotificationDelivery, UserDevice
+from .tasks import send_notification_push_delivery
 
 
 @override_settings(
@@ -115,6 +117,62 @@ class NotificationApiTests(APITestCase):
         self.assertTrue(notification.is_read)
         self.assertIsNotNone(notification.read_at)
 
+    def test_regular_user_cannot_request_external_notification_delivery(self):
+        self.client.force_authenticate(self.sender)
+
+        response = self.client.post(
+            self.url,
+            data={
+                "recipient": self.recipient.pk,
+                "type": Notification.Type.TEXT,
+                "title": "External",
+                "send_push": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_user_can_register_own_push_device(self):
+        self.client.force_authenticate(self.recipient)
+
+        response = self.client.post(
+            "/api/v1/communications/devices/",
+            data={
+                "provider": UserDevice.Provider.FCM,
+                "token": "device-token",
+                "device_id": "phone-1",
+                "platform": "android",
+                "app_version": "1.0.0",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        device = UserDevice.objects.get(pk=response.data["id"])
+        self.assertEqual(device.user, self.recipient)
+
+    @override_settings(PUSH_PROVIDER_URL="")
+    def test_push_delivery_records_failure_when_provider_is_not_configured(self):
+        UserDevice.objects.create(
+            user=self.recipient,
+            provider=UserDevice.Provider.FCM,
+            token="device-token",
+        )
+        notification = Notification.objects.create(
+            recipient=self.recipient,
+            actor=self.sender,
+            type=Notification.Type.TEXT,
+            title="Push me",
+            payload={"kind": "test"},
+        )
+
+        send_notification_push_delivery(notification.pk)
+
+        delivery = NotificationDelivery.objects.get(notification=notification)
+        self.assertEqual(delivery.channel, NotificationDelivery.Channel.PUSH)
+        self.assertEqual(delivery.status, NotificationDelivery.Status.FAILED)
+
 
 class InvitationApiTests(APITestCase):
     url = "/api/v1/communications/invitations/"
@@ -146,7 +204,7 @@ class InvitationApiTests(APITestCase):
             executive_authority_basis="Charter",
             executive_body_name="Board",
         )
-        OrganizationMember.objects.create(
+        self.manager_membership = OrganizationMember.objects.create(
             organization=self.organization,
             user=self.manager,
             role=OrganizationMember.Role.MANAGER,
@@ -218,3 +276,42 @@ class InvitationApiTests(APITestCase):
 
         self.assertEqual(first_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(second_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_collection_manager_can_invite_user_to_donor_group(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.manager_membership,
+            title="Winter help",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.manager_membership,
+        )
+        self.client.force_authenticate(self.manager)
+
+        create_response = self.client.post(
+            self.url,
+            data={
+                "target_type": "donor_group",
+                "target_id": donor_group.pk,
+                "invited_user": self.member.pk,
+                "send_email": False,
+                "send_push": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, status.HTTP_201_CREATED)
+        invitation = Invitation.objects.get(pk=create_response.data["id"])
+        self.assertEqual(create_response.data["target_type"], "donor_group")
+
+        self.client.force_authenticate(self.member)
+        accept_response = self.client.post(f"{self.url}{invitation.pk}/accept/")
+
+        self.assertEqual(accept_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            DonorGroupMember.objects.filter(
+                donor_group=donor_group,
+                user=self.member,
+            ).exists()
+        )

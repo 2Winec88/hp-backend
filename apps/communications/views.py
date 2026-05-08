@@ -4,11 +4,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .models import Invitation, Notification
+from .models import NotificationDelivery, UserDevice
 from .serializers import (
     InvitationCreateSerializer,
     InvitationSerializer,
     NotificationCreateSerializer,
+    NotificationDeliverySerializer,
     NotificationSerializer,
+    UserDeviceSerializer,
 )
 from .services import accept_invitation, cancel_invitation, decline_invitation
 
@@ -55,6 +58,36 @@ class NotificationViewSet(viewsets.ModelViewSet):
             notification.mark_read()
             updated += 1
         return Response({"updated": updated}, status=status.HTTP_200_OK)
+
+
+class UserDeviceViewSet(viewsets.ModelViewSet):
+    serializer_class = UserDeviceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        return UserDevice.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class NotificationDeliveryViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = NotificationDeliverySerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        queryset = NotificationDelivery.objects.select_related(
+            "notification",
+            "device",
+        ).filter(notification__recipient=self.request.user)
+        notification_id = self.request.query_params.get("notification")
+        if notification_id:
+            queryset = queryset.filter(notification_id=notification_id)
+        channel = self.request.query_params.get("channel")
+        if channel:
+            queryset = queryset.filter(channel=channel)
+        return queryset
 
 
 class InvitationViewSet(viewsets.ModelViewSet):

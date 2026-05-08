@@ -366,8 +366,7 @@ class OrganizationAdministrationApiTests(APITestCase):
         )
         self.event_category = Category.objects.create(name="Admin Category")
         self.city, _ = City.objects.get_or_create(
-            geoname_id=1486209,
-            defaults={"name": "Yekaterinburg"},
+            name="Yekaterinburg",
         )
         self.geodata = GeoData.objects.create(
             city=self.city,

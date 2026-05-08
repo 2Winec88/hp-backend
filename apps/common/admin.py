@@ -5,16 +5,16 @@ from .models import City, GeoData, Region
 
 @admin.register(Region)
 class RegionAdmin(admin.ModelAdmin):
-    list_display = ("name", "country_code", "geoname_id", "latitude", "longitude")
+    list_display = ("name", "country_code", "latitude", "longitude")
     list_filter = ("country_code",)
-    search_fields = ("name", "country_code", "geoname_id")
+    search_fields = ("name", "country_code")
 
 
 @admin.register(City)
 class CityAdmin(admin.ModelAdmin):
-    list_display = ("name", "region", "country_code", "geoname_id", "latitude", "longitude")
+    list_display = ("name", "region", "country_code", "latitude", "longitude")
     list_filter = ("country_code", "region")
-    search_fields = ("name", "region__name", "country_code", "geoname_id")
+    search_fields = ("name", "region__name", "country_code")
     autocomplete_fields = ("region",)
 
 

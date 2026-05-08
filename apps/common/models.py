@@ -4,7 +4,6 @@ from django.db import models
 
 class Region(models.Model):
     name = models.CharField(max_length=150)
-    geoname_id = models.PositiveIntegerField(unique=True, null=True, blank=True)
     latitude = models.DecimalField(
         max_digits=9,
         decimal_places=6,
@@ -45,7 +44,6 @@ class Region(models.Model):
 
 class City(models.Model):
     name = models.CharField(max_length=150)
-    geoname_id = models.PositiveIntegerField(unique=True, null=True, blank=True)
     latitude = models.DecimalField(
         max_digits=9,
         decimal_places=6,

@@ -122,8 +122,7 @@ class ProfileGeoDataTests(APITestCase):
             is_email_verified=True,
         )
         city, _ = City.objects.get_or_create(
-            geoname_id=1486209,
-            defaults={"name": "Yekaterinburg"},
+            name="Yekaterinburg",
         )
         geodata = GeoData.objects.create(
             city=city,

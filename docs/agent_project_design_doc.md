@@ -80,6 +80,13 @@ Email verification отправляется через Celery-задачу `send
 
 ### `apps.common`
 
+Current geodata note, 2026-05-08:
+
+- `Region` and `City` no longer store `geoname_id`.
+- Current production import path is the Russian JSON dataset handled by `import_russia_locations`.
+- `Region` and `City` remain read-only in public API.
+- `GeoData` is still the reusable location record for users, branches, events, and collections.
+
 Общий модуль. Здесь должны жить переиспользуемые сущности, не принадлежащие одному бизнес-домену.
 
 Принятое правило: всё общее и потенциально переиспользуемое добавлять сюда, а не размазывать по доменным приложениям.
@@ -279,6 +286,19 @@ WebSocket:
 
 - `ItemCategory`
 - `Item`
+- `UserItem`
+- `Collection`
+- `CollectionItem`
+- `BranchItem`
+- `DonorGroup`
+- `DonorGroupMember`
+- `DonorGroupItem`
+
+Текущее решение для MVP: `ItemCategory` используется как конкретный тип вещи/потребности, например "Зубная гигиена", "Питьевая вода", "Куртки". Поле `description` хранит примеры содержимого категории. Не дублировать это описание в будущих связующих моделях вроде `UserItem` и `CollectionItem`; там должны жить контекстные поля пользователя или сбора.
+
+Сейчас реализован минимальный слой сборов: пользовательские вещи, сборы организаций с `geodata`, позиции сборов и вещи, принимаемые филиалами. `CollectionUserItem` намеренно не добавлен: организатор пока вручную смотрит публичные `UserItem` и координирует передачу вне автоматического матчинга.
+
+Донорские группы реализованы как заготовка для будущих чатов, голосований, статусов и видеоотчётов. `DonorGroup` привязан к `Collection`, `DonorGroupMember` связывает пользователей с группой, `DonorGroupItem` хранит выбранный организатором `UserItem` и количество вещей пользователя для этой группы. Приглашения в донорскую группу идут через общий механизм `communications.Invitation` с `target_type="donor_group"`.
 
 Будущий главный бизнес-модуль должен покрыть:
 
@@ -489,6 +509,14 @@ uv run python manage.py makemigrations --check --dry-run
 11. WebSocket — realtime-слой, REST/БД — источник истины.
 
 ## 13. Что реализовывать дальше
+
+Current implementation note, 2026-05-08:
+
+- Organization branches are implemented.
+- Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items, courier profiles.
+- Donor group invitations are implemented through `communications.Invitation` with `target_type="donor_group"`.
+- Push delivery is implemented as an additional `Notification` delivery channel.
+- Remaining major collection work: transfer lifecycle, chats, voting, courier assignment workflow, video reports.
 
 Приоритетные направления:
 

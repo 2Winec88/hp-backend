@@ -199,6 +199,8 @@ DEFAULT_FROM_EMAIL = config(
     'DEFAULT_FROM_EMAIL',
     default='noreply@example.com',
 )
+PUSH_PROVIDER_URL = config('PUSH_PROVIDER_URL', default='')
+PUSH_PROVIDER_API_KEY = config('PUSH_PROVIDER_API_KEY', default='')
 
 REDIS_URL = config('REDIS_URL', default='redis://127.0.0.1:6379/0')
 

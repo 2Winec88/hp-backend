@@ -64,8 +64,6 @@ class ImportRussiaLocationsCommandTests(TestCase):
 
         region = Region.objects.get(name="Тестовая область", country_code="RU")
         city = City.objects.get(name="Тестоград", region=region, country_code="RU")
-        self.assertIsNone(region.geoname_id)
-        self.assertIsNone(city.geoname_id)
         self.assertEqual(str(city.latitude), "56.123456")
         self.assertEqual(str(city.longitude), "60.654321")
 
@@ -138,13 +136,12 @@ class CommonGeoDataApiTests(APITestCase):
             country_code="RU",
         )
         city, _ = City.objects.get_or_create(
-            geoname_id=1486209,
+            name="Yekaterinburg",
+            region=region,
+            country_code="RU",
             defaults={
-                "name": "Yekaterinburg",
                 "latitude": "56.857500",
                 "longitude": "60.612500",
-                "country_code": "RU",
-                "region": region,
             },
         )
 
@@ -152,7 +149,6 @@ class CommonGeoDataApiTests(APITestCase):
             self.cities_url,
             data={
                 "name": "Yekaterinburg",
-                "geoname_id": 1486209,
                 "latitude": "56.857500",
                 "longitude": "60.612500",
                 "country_code": "RU",
