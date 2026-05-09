@@ -100,18 +100,20 @@ Current geodata note, 2026-05-08:
 `Region`:
 
 - справочник регионов;
-- будет наполняться через GeoNames;
+- наполняется через русскоязычный JSON import командой `import_russia_locations` или административным backend-процессом;
 - не создаётся через публичный API;
 - поддерживает autocomplete через `GET /api/v1/common/regions/?search=...`;
-- содержит `name`, `geoname_id`, координаты региона, `country_code`.
+- содержит `name`, координаты региона, `country_code`;
+- `geoname_id` удалён и не является частью текущего API.
 
 `City`:
 
 - справочник городов;
-- будет наполняться через GeoNames;
+- наполняется через русскоязычный JSON import командой `import_russia_locations` или административным backend-процессом;
 - не создаётся через публичный API;
 - поддерживает autocomplete через `GET /api/v1/common/cities/?search=...`;
-- содержит `name`, `geoname_id`, координаты города, `country_code`, ссылку на `Region`.
+- содержит `name`, координаты города, `country_code`, ссылку на `Region`;
+- `geoname_id` удалён и не является частью текущего API.
 
 `GeoData`:
 
@@ -130,7 +132,7 @@ Current geodata note, 2026-05-08:
 - `GET /api/v1/common/regions/{id}/`
 - `GET/POST/PATCH/DELETE /api/v1/common/geodata/`
 
-Важно: `Region` и `City` read-only для публичного API. Регионы и города должны заводиться импортом из GeoNames или административным backend-процессом.
+Важно: `Region` и `City` read-only для публичного API. Регионы и города должны заводиться через `import_russia_locations`, миграции seed-данных или административный backend-процесс.
 
 В dev/test базу через migration загружен небольшой тестовый набор городов из разных частей России: Kaliningrad, Murmansk, Saint Petersburg, Moscow, Sochi, Yekaterinburg, Novosibirsk, Yakutsk, Vladivostok, Petropavlovsk-Kamchatsky.
 
@@ -144,16 +146,19 @@ Current geodata note, 2026-05-08:
 - мероприятия организаций;
 - новости организаций;
 - комментарии к новостям;
-- будущие филиалы организаций.
+- филиалы организаций и изображения филиалов.
 
 Ключевые модели:
 
 - `Category`
 - `Organization`
 - `OrganizationMember`
+- `OrganizationBranch`
+- `OrganizationBranchImage`
 - `Event`
 - `EventImage`
 - `OrganizationNews`
+- `OrganizationNewsImage`
 - `OrganizationNewsComment`
 - `OrganizationRegistrationRequest`
 
@@ -169,6 +174,19 @@ Current geodata note, 2026-05-08:
 - связывает пользователя и организацию;
 - роли: `manager`, `member`;
 - уникальность: один membership на пару organization/user.
+
+`OrganizationBranch`:
+
+- филиал или точка приёма организации;
+- принадлежит `Organization`;
+- использует nullable `geodata` на `common.GeoData`;
+- хранит описание, телефон, email, график работы и `is_active`;
+- управляется активным менеджером организации.
+
+`OrganizationBranchImage`:
+
+- галерея изображений филиала;
+- хранит `image`, `alt_text`, `sort_order`.
 
 `Event`:
 
@@ -242,23 +260,39 @@ Current geodata note, 2026-05-08:
 - универсальное in-app уведомление;
 - типы: `invitation`, `message`, `system`, `text`;
 - хранит `recipient`, `actor`, `title`, `body`, `payload`, `is_read`, `email_sent_at`;
+- поддерживает push-доставку через связанные `NotificationDelivery`;
 - может использоваться не только для приглашений, но и для текстов, системных событий, сообщений.
+
+`UserDevice`:
+
+- устройство пользователя для push-доставки;
+- поддерживает providers `fcm`, `apns`, `webpush`, `custom`;
+- хранит provider token, device_id, platform, app_version, is_active.
+
+`NotificationDelivery`:
+
+- аудит внешней доставки уведомлений;
+- каналы: `email`, `push`;
+- статусы: `pending`, `sent`, `failed`, `skipped`;
+- для push может ссылаться на `UserDevice`.
 
 `Invitation`:
 
 - универсальное приглашение;
 - использует `ContentType` + `object_id`, чтобы приглашать в разные типы целей;
-- сейчас поддержан `target_type="organization"`;
-- позже добавить `donor_group` через новый handler;
+- сейчас поддержаны `target_type="organization"` и `target_type="donor_group"`;
 - статусы: `pending`, `accepted`, `declined`, `expired`, `cancelled`;
 - связано с `Notification`;
-- при accept для организации создаёт `OrganizationMember`.
+- при accept для организации создаёт `OrganizationMember`;
+- при accept для donor group создаёт `DonorGroupMember`.
 
 Ключевые endpoints:
 
 - `GET/POST /api/v1/communications/notifications/`
 - `POST /api/v1/communications/notifications/{id}/mark-read/`
 - `POST /api/v1/communications/notifications/mark-all-read/`
+- `GET/POST/PATCH/DELETE /api/v1/communications/devices/`
+- `GET /api/v1/communications/notification-deliveries/`
 - `GET/POST /api/v1/communications/invitations/`
 - `POST /api/v1/communications/invitations/{id}/accept/`
 - `POST /api/v1/communications/invitations/{id}/decline/`
@@ -266,9 +300,10 @@ Current geodata note, 2026-05-08:
 
 Celery:
 
-- `send_notification_delivery(notification_id)` отправляет внешнюю доставку, сейчас email.
+- `send_notification_delivery(notification_id)` отправляет email-доставку.
+- `send_notification_push_delivery(notification_id)` отправляет push-доставку через настроенный HTTP provider.
 - Уведомление и приглашение сохраняются синхронно в БД.
-- Email отправляется через `transaction.on_commit(...)`.
+- Email и push отправляются через `transaction.on_commit(...)`.
 
 WebSocket:
 
@@ -280,7 +315,7 @@ WebSocket:
 
 ### `apps.collections`
 
-Пока реализован только начальный справочник вещей.
+Реализует публичный REST API для сборов гуманитарной помощи, вещей пользователей, донорских групп, голосований, встреч и курьерских профилей. Transfer lifecycle, чаты, выбор финального результата голосования, назначение курьера и видеоотчёты пока остаются будущей работой.
 
 Ключевые модели:
 
@@ -291,22 +326,39 @@ WebSocket:
 - `CollectionItem`
 - `BranchItem`
 - `DonorGroup`
+- `DonorGroupMeeting`
 - `DonorGroupMember`
 - `DonorGroupItem`
+- `CourierProfile`
+- `MeetingPlaceProposal`
+- `Poll`
+- `PollOption`
+- `PollVote`
 
 Текущее решение для MVP: `ItemCategory` используется как конкретный тип вещи/потребности, например "Зубная гигиена", "Питьевая вода", "Куртки". Поле `description` хранит примеры содержимого категории. Не дублировать это описание в будущих связующих моделях вроде `UserItem` и `CollectionItem`; там должны жить контекстные поля пользователя или сбора.
 
-Сейчас реализован минимальный слой сборов: пользовательские вещи, сборы организаций с `geodata`, позиции сборов и вещи, принимаемые филиалами. `CollectionUserItem` намеренно не добавлен: организатор пока вручную смотрит публичные `UserItem` и координирует передачу вне автоматического матчинга.
+Сейчас реализован слой сборов: пользовательские вещи, сборы организаций с `geodata`, позиции сборов, вещи, принимаемые филиалами, донорские группы, профили курьеров, предложения мест встречи и голосования. `CollectionUserItem` намеренно не добавлен: организатор пока вручную смотрит публичные `UserItem` и координирует передачу вне автоматического матчинга.
 
-Донорские группы реализованы как заготовка для будущих чатов, голосований, статусов и видеоотчётов. `DonorGroup` привязан к `Collection`, `DonorGroupMember` связывает пользователей с группой, `DonorGroupItem` хранит выбранный организатором `UserItem` и количество вещей пользователя для этой группы. Приглашения в донорскую группу идут через общий механизм `communications.Invitation` с `target_type="donor_group"`.
+Донорские группы привязаны к `Collection`. `DonorGroupMember` связывает пользователей с группой, `DonorGroupItem` хранит выбранный организатором `UserItem` и количество вещей пользователя для этой группы. Приглашения в донорскую группу идут через общий механизм `communications.Invitation` с `target_type="donor_group"` и при accept создают membership.
 
-Будущий главный бизнес-модуль должен покрыть:
+`DonorGroupMeeting` хранит вручную назначенное место и время встречи группы. Назначение встречи выполняется через `POST /api/v1/collections/donor-groups/{id}/schedule-meeting/` и не привязано к итогам голосований.
 
-- сборы гуманитарной помощи;
-- вещи пользователей;
-- донорские группы;
-- голосования;
+Голосования поддерживают:
+
+- типы `text`, `date`, `place`;
+- статусы `draft`, `open`, `closed`;
+- варианты `PollOption`;
+- один голос пользователя на один poll;
+- place polls из предложений места встречи;
+- repost poll без вариантов с нулём голосов;
+- push/in-app уведомления участникам donor group при создании открытого donor group poll.
+
+Будущая часть `collections` должна покрыть:
+
 - передачу вещей;
+- назначение и workflow курьера;
+- финальный выбор результата голосования как бизнес-действие;
+- чаты донорской группы;
 - видеоотчёты.
 
 Ожидаемый доменный сценарий:
@@ -314,10 +366,11 @@ WebSocket:
 1. Организация создаёт сбор с перечнем необходимых вещей.
 2. Пользователь добавляет свои вещи в сбор.
 3. Формируется донорская группа или выбирается самостоятельная передача через филиал.
-4. Для донорской группы создаётся чат и голосования.
-5. Курьер-доброволец принимает вещи.
-6. Загружается видеоотчёт.
-7. Участники получают уведомления.
+4. Для донорской группы создаются голосования и вручную назначается встреча.
+5. Позже добавляется чат donor group.
+6. Курьер-доброволец принимает вещи.
+7. Загружается видеоотчёт.
+8. Участники получают уведомления.
 
 ## 4. Роли проекта
 
@@ -368,19 +421,22 @@ WebSocket:
 
 - `User.geodata`
 - `Event.geodata`
+- `OrganizationBranch.geodata`
+- `Collection.geodata`
+- `DonorGroupMeeting.geodata`
+- `MeetingPlaceProposal.geodata`
+- `PollOption.geodata`
 
 Ожидаемое использование позже:
 
-- филиалы организаций;
-- точки передачи вещей;
-- варианты места в голосованиях донорской группы;
-- адреса самостоятельной передачи через филиал.
+- точки передачи вещей в transfer lifecycle;
+- адреса самостоятельной передачи через филиал, если появится отдельная модель передачи.
 
 `is_online` остаётся на сущности мероприятия. Не выводить онлайн только по `geodata = null`: отсутствие геоданных может означать незаполненное место, черновик или офлайн без точного адреса.
 
 Правила:
 
-- `City` — read-only API, импортируется из GeoNames.
+- `City` — read-only API, импортируется через `import_russia_locations` или административный backend-процесс.
 - `GeoData` можно создавать через API.
 - `latitude` допустима от `-90` до `90`.
 - `longitude` допустима от `-180` до `180`.
@@ -393,6 +449,7 @@ WebSocket:
 - `/api/v1/accounts/`
 - `/api/v1/common/`
 - `/api/v1/communications/`
+- `/api/v1/collections/`
 - `/api/v1/organizations/`
 
 Документация OpenAPI:
@@ -411,6 +468,7 @@ Celery используется для фоновых задач:
 
 - email verification;
 - email-доставка уведомлений;
+- push-доставка уведомлений;
 - будущие системные фоновые задачи.
 
 Правило: бизнес-факт сохраняется синхронно в БД, внешняя доставка уходит в Celery после `transaction.on_commit`.
@@ -466,6 +524,7 @@ Redis используется:
 uv run python manage.py check
 uv run python manage.py test apps.common apps.accounts apps.organizations
 uv run python manage.py test apps.communications
+uv run python manage.py test apps.collections
 ```
 
 Для проверки миграций:
@@ -484,6 +543,8 @@ uv run python manage.py makemigrations --check --dry-run
 - event/news manager permissions;
 - organization news comments/views;
 - communications notifications/invitations;
+- communications devices/push delivery audit;
+- collections CRUD, donor groups, meetings, proposals and polls;
 - websocket health endpoint.
 
 ## 11. Документация в `docs`
@@ -497,7 +558,7 @@ uv run python manage.py makemigrations --check --dry-run
 ## 12. Важные архитектурные решения
 
 1. `common` — место для всего общего и переиспользуемого.
-2. Города не создаются через публичный API. Источник городов — GeoNames.
+2. Города не создаются через публичный API. Источник городов — JSON import `import_russia_locations`, seed-миграции или административный backend-процесс.
 3. `GeoData` — общая модель местоположения.
 4. `is_online` — свойство мероприятия, не свойство геоданных.
 5. Организационные новости принадлежат организации, не мероприятию.
@@ -510,7 +571,7 @@ uv run python manage.py makemigrations --check --dry-run
 
 ## 13. Что реализовывать дальше
 
-Current implementation note, 2026-05-08:
+Current implementation note, 2026-05-09:
 
 - Organization branches are implemented.
 - Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items, courier profiles.
@@ -522,31 +583,30 @@ Current implementation note, 2026-05-08:
 
 Приоритетные направления:
 
-1. Филиалы организаций.
-   - Использовать `GeoData`.
-   - Добавить описание, контакты, изображения, график работы.
-   - Менеджеры организации управляют филиалами.
+1. Transfer lifecycle.
+   - Передача вещей от donor group/пользователя к организации или через курьера.
+   - Статусы передачи и подтверждения сторон.
+   - Не делать автоматический matching; координация остаётся ручной.
 
-2. Полноценный `collections`.
-   - Сборы гуманитарной помощи.
-   - Позиции необходимых вещей.
-   - Вещи пользователей.
-   - Донорские группы.
-   - Голосования.
-   - Передачи вещей.
-   - Видеоотчёты.
+2. Courier assignment workflow.
+   - Назначение курьера-добровольца на передачу.
+   - Подтверждение принятия и доставки вещей.
 
-3. Чаты.
+3. Video reports.
+   - Загрузка видеоотчётов после передачи.
+   - Доступ участникам соответствующего сбора/передачи и менеджерам организации.
+
+4. Чаты.
    - Чат организации.
    - Чат донорской группы.
    - Доступ только участникам соответствующего контекста.
    - REST history + websocket realtime.
 
-4. Donor group invitations.
-   - Добавить handler в `communications.invitation_handlers`.
-   - Не переписывать общий invitation API.
+5. Poll finalization.
+   - Явный выбор финального результата голосования как отдельное бизнес-действие.
+   - Не смешивать ручное `schedule-meeting` с автоматическим применением poll result.
 
-5. GeoNames import.
+6. Location import maintenance.
    - Русскоязычный JSON import: `uv run python manage.py import_russia_locations`.
    - Загружать регионы в `common.Region`.
    - Загружать города в `common.City`.

@@ -149,7 +149,6 @@ Response item:
 {
   "id": 1,
   "name": "Свердловская область",
-  "geoname_id": null,
   "latitude": null,
   "longitude": null,
   "country_code": "RU",
@@ -175,7 +174,6 @@ Response item:
 {
   "id": 1,
   "name": "Екатеринбург",
-  "geoname_id": null,
   "latitude": "56.838011",
   "longitude": "60.597465",
   "country_code": "RU",
@@ -556,7 +554,7 @@ Payload:
 
 ## Communications
 
-Current communications note:
+Актуальные коммуникации:
 
 - Invitations support `target_type="organization"` and `target_type="donor_group"`.
 - Push notifications are documented below in `Detailed Push Notifications API`.
@@ -583,11 +581,47 @@ Create payload:
   "title": "Title",
   "body": "Body",
   "payload": {},
-  "send_email": false
+  "send_email": false,
+  "send_push": false
 }
 ```
 
-Allowed create types: `text`, `message`, `system`. Invitation notifications создаются через invitations API.
+Allowed create types: `text`, `message`, `system`. Invitation notifications создаются через invitations API. Прямой `send_email=true` или `send_push=true` при создании уведомления доступен только staff superuser.
+
+### Devices
+
+```http
+GET    /api/v1/communications/devices/
+POST   /api/v1/communications/devices/
+PATCH  /api/v1/communications/devices/{id}/
+DELETE /api/v1/communications/devices/{id}/
+```
+
+Пользователь управляет только своими push-устройствами.
+
+Payload:
+
+```json
+{
+  "provider": "fcm",
+  "token": "device-token",
+  "device_id": "phone-1",
+  "platform": "android",
+  "app_version": "1.0.0"
+}
+```
+
+Supported provider values: `fcm`, `apns`, `webpush`, `custom`.
+
+### Notification Deliveries
+
+```http
+GET /api/v1/communications/notification-deliveries/
+GET /api/v1/communications/notification-deliveries/?notification=1
+GET /api/v1/communications/notification-deliveries/?channel=push
+```
+
+Read-only аудит email/push-доставки. Пользователь видит доставки только своих уведомлений.
 
 ### Invitations
 
@@ -610,7 +644,8 @@ Create payload for organization invitation:
   "target_id": 1,
   "invited_user": 2,
   "role": "member",
-  "send_email": true
+  "send_email": true,
+  "send_push": true
 }
 ```
 
@@ -643,7 +678,7 @@ Authorization: Bearer <access_token>
 
 ## Collections
 
-Current API note:
+Актуальные правила Collections:
 
 - Полная спецификация Collections находится ниже в этом же файле.
 - Base prefix: `/api/v1/collections/`.
@@ -677,8 +712,6 @@ The `collections` app has a public REST API now. Transfer lifecycle, chats, fina
 ---
 
 ## Detailed Collections API
-
-# Collections API
 
 Base prefix: `/api/v1/collections/`.
 
@@ -1001,8 +1034,6 @@ If `proposal_ids` is omitted, all proposals from the donor group become poll opt
 
 ## Detailed Push Notifications API
 
-# Push Notifications
-
 Push delivery is implemented as an additional `Notification` delivery channel.
 
 ## Device Registration
@@ -1084,8 +1115,6 @@ GET /api/v1/communications/notification-deliveries/?channel=push
 
 ## API Testing Flow
 
-# Руководство по тестированию API через Postman
-
 ## Базовые настройки
 
 Базовый URL для локального backend:
@@ -1101,8 +1130,8 @@ http://127.0.0.1:8000
 | `base_url` | `http://127.0.0.1:8000` |
 | `access_token` | пусто |
 | `refresh_token` | пусто |
-| `region_id` | id региона, заранее загруженного из GeoNames |
-| `city_id` | id города, заранее загруженного из GeoNames |
+| `region_id` | id региона, заранее загруженного через `import_russia_locations`, seed-миграцию или админ-процесс |
+| `city_id` | id города, заранее загруженного через `import_russia_locations`, seed-миграцию или админ-процесс |
 | `geodata_id` | пусто |
 | `organization_id` | пусто |
 | `event_id` | пусто |
@@ -1193,7 +1222,7 @@ GET {{base_url}}/api/v1/common/regions/?search=sver
 GET {{base_url}}/api/v1/common/cities/
 ```
 
-Города нельзя создавать через публичный API. Они заводятся через импорт из GeoNames или через административный backend-процесс. В ответе `region` - id региона, `region_name` - название региона для отображения.
+Города нельзя создавать через публичный API. Они заводятся через `import_russia_locations`, seed-миграцию или административный backend-процесс. В ответе `region` - id региона, `region_name` - название региона для отображения.
 
 В dev/test базу через migration загружен тестовый набор городов из разных частей России: Kaliningrad, Murmansk, Saint Petersburg, Moscow, Sochi, Yekaterinburg, Novosibirsk, Yakutsk, Vladivostok, Petropavlovsk-Kamchatsky.
 
