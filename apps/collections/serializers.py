@@ -10,6 +10,7 @@ from .models import (
     CourierProfile,
     DonorGroup,
     DonorGroupItem,
+    DonorGroupMeeting,
     DonorGroupMember,
     ItemCategory,
     MeetingPlaceProposal,
@@ -289,10 +290,58 @@ class DonorGroupItemSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class DonorGroupMeetingSerializer(serializers.ModelSerializer):
+    finalized_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = DonorGroupMeeting
+        fields = (
+            "id",
+            "donor_group",
+            "geodata",
+            "street",
+            "description",
+            "starts_at",
+            "ends_at",
+            "finalized_by_member",
+            "finalized_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "donor_group",
+            "finalized_by_member",
+            "finalized_at",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate(self, attrs):
+        geodata = attrs.get("geodata", getattr(self.instance, "geodata", None))
+        street = attrs.get("street", getattr(self.instance, "street", ""))
+        description = attrs.get("description", getattr(self.instance, "description", ""))
+        if not (geodata or street or description):
+            raise serializers.ValidationError(
+                {"geodata": "Meeting requires place data."}
+            )
+
+        starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
+        ends_at = attrs.get("ends_at", getattr(self.instance, "ends_at", None))
+        if starts_at is None:
+            raise serializers.ValidationError({"starts_at": "Meeting requires starts_at."})
+        if ends_at and ends_at < starts_at:
+            raise serializers.ValidationError(
+                {"ends_at": "End date cannot be earlier than start date."}
+            )
+        return attrs
+
+
 class DonorGroupSerializer(serializers.ModelSerializer):
     created_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
     members = DonorGroupMemberSerializer(many=True, read_only=True)
     items = DonorGroupItemSerializer(many=True, read_only=True)
+    meeting = DonorGroupMeetingSerializer(read_only=True)
     members_count = serializers.SerializerMethodField()
     items_count = serializers.SerializerMethodField()
 
@@ -305,6 +354,7 @@ class DonorGroupSerializer(serializers.ModelSerializer):
             "title",
             "members",
             "items",
+            "meeting",
             "members_count",
             "items_count",
             "created_at",
@@ -315,6 +365,7 @@ class DonorGroupSerializer(serializers.ModelSerializer):
             "created_by_member",
             "members",
             "items",
+            "meeting",
             "members_count",
             "items_count",
             "created_at",

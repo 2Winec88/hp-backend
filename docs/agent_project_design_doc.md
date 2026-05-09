@@ -490,7 +490,7 @@ uv run python manage.py makemigrations --check --dry-run
 
 - `agent_project_design_doc.md` — этот агентский диздок.
 - `frontend_agent_api_guide.md` — общий frontend-facing API guide по всем текущим endpoints.
-- `postman_api_testing_guide.md` — инструкция для Postman.
+- Postman/API testing flow хранится в `frontend_agent_api_guide.md`.
 - `frontend_agent_geodata_instructions.md` — инструкция для frontend-агента по geodata.
 - `accounts_views_diagram.md` — диаграмма views модуля accounts.
 
@@ -515,6 +515,7 @@ Current implementation note, 2026-05-08:
 - Organization branches are implemented.
 - Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items, courier profiles.
 - Donor group invitations are implemented through `communications.Invitation` with `target_type="donor_group"`.
+- Donor group meeting scheduling is implemented: collection authors and organization managers manually set a donor group's meeting place and date through `schedule-meeting`; this is intentionally not tied to poll results.
 - Push delivery is implemented as an additional `Notification` delivery channel.
 - Voting base is implemented: text/date/place polls, poll options, one vote per user per poll, meeting place proposals, place-poll creation from proposals, poll reposting without zero-vote options, and push notifications for new open donor group polls.
 - Remaining major collection work: transfer lifecycle, chats, final poll-result selection, courier assignment workflow, video reports.

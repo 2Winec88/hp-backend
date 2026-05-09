@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -19,6 +22,7 @@ from .models import (
     CourierProfile,
     DonorGroup,
     DonorGroupItem,
+    DonorGroupMeeting,
     DonorGroupMember,
     ItemCategory,
     MeetingPlaceProposal,
@@ -423,6 +427,101 @@ class CollectionPermissionTests(TestCase):
             {"quantity": 3},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_collection_author_can_schedule_donor_group_meeting_manually(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+        geodata = GeoData.objects.create(street="Lenina, 1")
+        starts_at = timezone.now() + timedelta(days=2)
+        ends_at = starts_at + timedelta(hours=1)
+
+        self.client.force_authenticate(user=self.member)
+        response = self.client.post(
+            reverse("donor-group-schedule-meeting", args=(donor_group.id,)),
+            {
+                "geodata": geodata.id,
+                "street": "Lenina, 1",
+                "description": "Main entrance",
+                "starts_at": starts_at.isoformat(),
+                "ends_at": ends_at.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        meeting = DonorGroupMeeting.objects.get(donor_group=donor_group)
+        self.assertEqual(meeting.geodata, geodata)
+        self.assertEqual(meeting.street, "Lenina, 1")
+        self.assertEqual(meeting.finalized_by_member, self.member_membership)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.donor,
+                payload__target_type="donor_group_meeting",
+                payload__target_id=meeting.id,
+            ).exists()
+        )
+
+    def test_donor_group_meeting_can_be_rescheduled_without_poll_options(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        starts_at = timezone.now() + timedelta(days=2)
+        meeting = DonorGroupMeeting.objects.create(
+            donor_group=donor_group,
+            street="Old place",
+            starts_at=starts_at,
+            finalized_by_member=self.member_membership,
+        )
+        new_starts_at = starts_at + timedelta(days=1)
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(
+            reverse("donor-group-schedule-meeting", args=(donor_group.id,)),
+            {
+                "street": "New place",
+                "starts_at": new_starts_at.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.street, "New place")
+        self.assertEqual(meeting.finalized_by_member, self.manager_membership)
+
+    def test_non_manager_cannot_schedule_donor_group_meeting(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+
+        self.client.force_authenticate(user=self.donor)
+        response = self.client.post(
+            reverse("donor-group-schedule-meeting", args=(donor_group.id,)),
+            {
+                "street": "No access",
+                "starts_at": (timezone.now() + timedelta(days=1)).isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_courier_profiles_are_public_but_only_owner_can_edit(self):
         courier_profile = CourierProfile.objects.create(

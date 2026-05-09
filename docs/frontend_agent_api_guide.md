@@ -1,6 +1,8 @@
-# Frontend Agent API Guide
+﻿# Frontend Agent API Guide
 
-Документ описывает frontend-facing API проекта. Источник истины для точной схемы также доступен в OpenAPI:
+Единый гайд для frontend-агента. Это основной файл с frontend-facing API-документацией, включая Collections, push-уведомления и flow для проверки API.
+
+Источник истины для точной схемы также доступен в OpenAPI:
 
 - `GET /api/schema/`
 - `GET /api/docs/`
@@ -13,6 +15,10 @@
 ```text
 Authorization: Bearer <access_token>
 ```
+
+JSON-файлы городов и регионов в `docs` являются справочными данными, а не API-гайдом, поэтому в этот файл не встроены.
+
+---
 
 ## Accounts
 
@@ -553,7 +559,7 @@ Payload:
 Current communications note:
 
 - Invitations support `target_type="organization"` and `target_type="donor_group"`.
-- Push notifications are documented in `docs/push_notifications.md`.
+- Push notifications are documented below in `Detailed Push Notifications API`.
 
 ### Notifications
 
@@ -610,7 +616,7 @@ Create payload for organization invitation:
 
 Allowed organization roles: `manager`, `member`. Принимать приглашение может только invited user. Отменять может пользователь, который имеет право приглашать в target.
 
-Сейчас поддержан `target_type="organization"`. Donor group invitations будут добавлены после реализации donor groups в `collections`.
+Сейчас поддержаны `target_type="organization"` и `target_type="donor_group"`.
 
 ## WebSocket
 
@@ -639,7 +645,7 @@ Authorization: Bearer <access_token>
 
 Current API note:
 
-- Detailed guide: `docs/collections_api.md`.
+- Полная спецификация Collections находится ниже в этом же файле.
 - Base prefix: `/api/v1/collections/`.
 - Public read endpoints exist for item categories, user items, collections, collection items, branch items, donor groups, donor group members, donor group items, and courier profiles.
 - Authenticated users create their own `user-items` and `courier-profiles`.
@@ -647,13 +653,14 @@ Current API note:
 - Collection author or active organization manager manages collections, collection items, donor groups, donor group members, and donor group items.
 - Active organization manager manages branch items.
 - Donor group invitations use `/api/v1/communications/invitations/` with `target_type="donor_group"`.
+- Collection authors and organization managers manually schedule donor group meetings with `POST /api/v1/collections/donor-groups/{id}/schedule-meeting/`. This sets the meeting place and date directly and is not tied to poll results.
 - Poll endpoints are available under `/api/v1/collections/polls/`, `/poll-options/`, `/poll-votes/`, and `/meeting-place-proposals/`.
 - Poll kinds are `text`, `date`, and `place`; poll statuses are `draft`, `open`, and `closed`.
 - Donor group members can submit meeting place proposals and vote in donor group polls.
 - Collection authors and organization managers create donor group polls, repost polls without zero-vote options, and create place polls from meeting place proposals.
 - News authors and organization managers can attach polls to news.
 - New open donor group polls create notification records and push delivery tasks for donor group members.
-- Push notification guide: `docs/push_notifications.md`.
+- Полная спецификация push-уведомлений находится ниже в этом же файле.
 
 The `collections` app has a public REST API now. Transfer lifecycle, chats, final poll-result selection, courier assignment workflow, and video reports are still future work.
 
@@ -666,3 +673,654 @@ The `collections` app has a public REST API now. Transfer lifecycle, chats, fina
 - Для организационного контента проверяйте права через backend responses, но в UI скрывайте edit/delete для неавторов и не-менеджеров.
 - Для file fields используйте `multipart/form-data`.
 - При `401` отправляйте refresh token flow, при `403` показывайте отсутствие прав, при `400` показывайте field errors.
+
+---
+
+## Detailed Collections API
+
+# Collections API
+
+Base prefix: `/api/v1/collections/`.
+
+## Endpoints
+
+```http
+GET /api/v1/collections/item-categories/
+GET /api/v1/collections/item-categories/{id}/
+
+GET    /api/v1/collections/user-items/
+POST   /api/v1/collections/user-items/
+GET    /api/v1/collections/user-items/{id}/
+PATCH  /api/v1/collections/user-items/{id}/
+DELETE /api/v1/collections/user-items/{id}/
+
+GET    /api/v1/collections/collections/
+POST   /api/v1/collections/collections/
+GET    /api/v1/collections/collections/{id}/
+PATCH  /api/v1/collections/collections/{id}/
+DELETE /api/v1/collections/collections/{id}/
+
+GET    /api/v1/collections/collection-items/
+POST   /api/v1/collections/collection-items/
+GET    /api/v1/collections/collection-items/{id}/
+PATCH  /api/v1/collections/collection-items/{id}/
+DELETE /api/v1/collections/collection-items/{id}/
+
+GET    /api/v1/collections/branch-items/
+POST   /api/v1/collections/branch-items/
+GET    /api/v1/collections/branch-items/{id}/
+PATCH  /api/v1/collections/branch-items/{id}/
+DELETE /api/v1/collections/branch-items/{id}/
+
+GET    /api/v1/collections/donor-groups/
+POST   /api/v1/collections/donor-groups/
+GET    /api/v1/collections/donor-groups/{id}/
+PATCH  /api/v1/collections/donor-groups/{id}/
+DELETE /api/v1/collections/donor-groups/{id}/
+POST   /api/v1/collections/donor-groups/{id}/schedule-meeting/
+
+GET    /api/v1/collections/donor-group-members/
+POST   /api/v1/collections/donor-group-members/
+GET    /api/v1/collections/donor-group-members/{id}/
+PATCH  /api/v1/collections/donor-group-members/{id}/
+DELETE /api/v1/collections/donor-group-members/{id}/
+
+GET    /api/v1/collections/donor-group-items/
+POST   /api/v1/collections/donor-group-items/
+GET    /api/v1/collections/donor-group-items/{id}/
+PATCH  /api/v1/collections/donor-group-items/{id}/
+DELETE /api/v1/collections/donor-group-items/{id}/
+
+GET    /api/v1/collections/courier-profiles/
+POST   /api/v1/collections/courier-profiles/
+GET    /api/v1/collections/courier-profiles/{id}/
+PATCH  /api/v1/collections/courier-profiles/{id}/
+DELETE /api/v1/collections/courier-profiles/{id}/
+
+GET    /api/v1/collections/meeting-place-proposals/
+POST   /api/v1/collections/meeting-place-proposals/
+GET    /api/v1/collections/meeting-place-proposals/{id}/
+PATCH  /api/v1/collections/meeting-place-proposals/{id}/
+DELETE /api/v1/collections/meeting-place-proposals/{id}/
+
+GET    /api/v1/collections/polls/
+POST   /api/v1/collections/polls/
+GET    /api/v1/collections/polls/{id}/
+PATCH  /api/v1/collections/polls/{id}/
+DELETE /api/v1/collections/polls/{id}/
+POST   /api/v1/collections/polls/{id}/repost/
+POST   /api/v1/collections/polls/from-place-proposals/
+
+GET    /api/v1/collections/poll-options/
+POST   /api/v1/collections/poll-options/
+GET    /api/v1/collections/poll-options/{id}/
+PATCH  /api/v1/collections/poll-options/{id}/
+DELETE /api/v1/collections/poll-options/{id}/
+
+GET    /api/v1/collections/poll-votes/
+POST   /api/v1/collections/poll-votes/
+GET    /api/v1/collections/poll-votes/{id}/
+PATCH  /api/v1/collections/poll-votes/{id}/
+DELETE /api/v1/collections/poll-votes/{id}/
+```
+
+## Permissions
+
+- Item categories: public read-only.
+- User items: public read; authenticated users create their own items; only the owner updates or deletes.
+- Collections: public read; active organization members create; the author or an active organization manager updates or deletes.
+- Collection items: public read; the collection author or an active organization manager creates, updates, or deletes.
+- Branch items: public read; only an active manager of the branch organization creates, updates, or deletes.
+- Donor groups: public read; the collection author or an active organization manager creates, updates, or deletes.
+- Donor group meeting scheduling: the collection author or an active organization manager manually sets or updates the group's meeting place and date. This is not tied to poll results.
+- Donor group members: public read; the collection author or an active organization manager manages members. Accepting a donor group invitation also creates membership.
+- Donor group items: public read; the collection author or an active organization manager links user items and selected quantities.
+- Invitations: use `/api/v1/communications/invitations/` with `target_type = "donor_group"`.
+- Courier profiles: public read; authenticated users create their own profile; only the owner updates or deletes.
+- Meeting place proposals: public read; donor group members create proposals; the proposal author, collection author, or organization manager updates or deletes.
+- Polls: public read; donor group polls are managed by the collection author or organization manager; news polls are managed by the news author or organization manager.
+- Poll options: public read; only the corresponding poll manager creates, updates, or deletes options.
+- Poll votes: authenticated users see and manage only their own votes; donor group polls accept votes only from donor group members.
+- New open donor group polls create in-app notifications and push delivery tasks for donor group members.
+
+## Payloads
+
+User item:
+
+```json
+{
+  "category": 1,
+  "quantity": 2,
+  "description": "Optional note"
+}
+```
+
+Collection:
+
+```json
+{
+  "organization": 1,
+  "branch": 1,
+  "geodata": 1,
+  "title": "Winter help",
+  "description": "Warm clothes and blankets",
+  "status": "draft",
+  "starts_at": "2026-06-01T10:00:00+05:00",
+  "ends_at": "2026-06-30T18:00:00+05:00"
+}
+```
+
+Collection item:
+
+```json
+{
+  "collection": 1,
+  "category": 1,
+  "quantity_required": 10,
+  "description": "5 liter bottles preferred"
+}
+```
+
+Branch item:
+
+```json
+{
+  "branch": 1,
+  "category": 1,
+  "description": "Accepted at this branch"
+}
+```
+
+Donor group:
+
+```json
+{
+  "collection": 1,
+  "title": "Central pickup group"
+}
+```
+
+Donor group responses include `meeting` when a meeting has been scheduled:
+
+```json
+{
+  "id": 1,
+  "collection": 1,
+  "created_by_member": 1,
+  "title": "Central pickup group",
+  "meeting": {
+    "id": 1,
+    "donor_group": 1,
+    "geodata": 1,
+    "street": "Lenina, 1",
+    "description": "Main entrance",
+    "starts_at": "2026-06-06T12:00:00+05:00",
+    "ends_at": "2026-06-06T13:00:00+05:00",
+    "finalized_by_member": 1,
+    "finalized_at": "2026-05-09T12:00:00+05:00",
+    "created_at": "2026-05-09T12:00:00+05:00",
+    "updated_at": "2026-05-09T12:00:00+05:00"
+  }
+}
+```
+
+Schedule or reschedule donor group meeting:
+
+```http
+POST /api/v1/collections/donor-groups/{id}/schedule-meeting/
+```
+
+```json
+{
+  "geodata": 1,
+  "street": "Lenina, 1",
+  "description": "Main entrance",
+  "starts_at": "2026-06-06T12:00:00+05:00",
+  "ends_at": "2026-06-06T13:00:00+05:00"
+}
+```
+
+`starts_at` is required. Provide at least one place field: `geodata`, `street`, or `description`. Reposting or finalizing polls is not required to schedule a meeting.
+
+Donor group invitation:
+
+```json
+{
+  "target_type": "donor_group",
+  "target_id": 1,
+  "invited_user": 2,
+  "send_email": false,
+  "send_push": true
+}
+```
+
+Donor group item:
+
+```json
+{
+  "donor_group": 1,
+  "user_item": 1,
+  "quantity": 2
+}
+```
+
+Courier profile:
+
+```json
+{
+  "car_name": "Lada Largus"
+}
+```
+
+Meeting place proposal:
+
+```json
+{
+  "donor_group": 1,
+  "geodata": 1,
+  "street": "Lenina, 1",
+  "description": "Main entrance"
+}
+```
+
+Poll:
+
+```json
+{
+  "donor_group": 1,
+  "news": null,
+  "title": "Pickup time",
+  "description": "",
+  "kind": "date",
+  "status": "open",
+  "closes_at": "2026-06-01T10:00:00+05:00"
+}
+```
+
+`kind` values: `text`, `date`, `place`. `status` values: `draft`, `open`, `closed`.
+
+Poll option:
+
+```json
+{
+  "poll": 1,
+  "text": "Saturday",
+  "starts_at": "2026-06-06T12:00:00+05:00",
+  "ends_at": null,
+  "geodata": null,
+  "place_street": "",
+  "place_description": "",
+  "sort_order": 0
+}
+```
+
+For `text` polls, `text` is required. For `date` polls, `starts_at` is required. For `place` polls, provide at least one place field: `geodata`, `place_street`, or `place_description`.
+
+Vote:
+
+```json
+{
+  "poll": 1,
+  "option": 1
+}
+```
+
+Repost poll without zero-vote options:
+
+```http
+POST /api/v1/collections/polls/{id}/repost/
+```
+
+```json
+{
+  "title": "Pickup time, second round",
+  "status": "open",
+  "closes_at": "2026-06-02T10:00:00+05:00"
+}
+```
+
+Create a place poll from donor group proposals:
+
+```http
+POST /api/v1/collections/polls/from-place-proposals/
+```
+
+```json
+{
+  "donor_group": 1,
+  "title": "Meeting place",
+  "description": "",
+  "status": "open",
+  "proposal_ids": [1, 2, 3]
+}
+```
+
+If `proposal_ids` is omitted, all proposals from the donor group become poll options.
+
+---
+
+## Detailed Push Notifications API
+
+# Push Notifications
+
+Push delivery is implemented as an additional `Notification` delivery channel.
+
+## Device Registration
+
+Authenticated users register devices through:
+
+```http
+GET    /api/v1/communications/devices/
+POST   /api/v1/communications/devices/
+PATCH  /api/v1/communications/devices/{id}/
+DELETE /api/v1/communications/devices/{id}/
+```
+
+Payload:
+
+```json
+{
+  "provider": "fcm",
+  "token": "device-token",
+  "device_id": "phone-1",
+  "platform": "android",
+  "app_version": "1.0.0"
+}
+```
+
+Supported provider values: `fcm`, `apns`, `webpush`, `custom`.
+
+## Delivery
+
+Notification creation supports:
+
+```json
+{
+  "send_push": true
+}
+```
+
+Only staff superusers can request external delivery through direct notification creation. Invitation delivery uses the invitation permission handlers instead.
+
+Invitation creation also supports `send_push`; the default is `true`.
+
+Push delivery is scheduled through Celery with `transaction.on_commit(...)`, the same pattern as email delivery. The task sends one request per active user device.
+
+## Provider
+
+Configure an HTTP push provider endpoint:
+
+```text
+PUSH_PROVIDER_URL=https://push-provider.example/send
+PUSH_PROVIDER_API_KEY=optional-token
+```
+
+The backend sends this JSON payload:
+
+```json
+{
+  "provider": "fcm",
+  "token": "device-token",
+  "title": "Notification title",
+  "body": "Notification body",
+  "data": {},
+  "notification_id": 1
+}
+```
+
+If `PUSH_PROVIDER_API_KEY` is set, it is sent as `Authorization: Bearer <token>`.
+
+## Delivery Audit
+
+Delivery attempts are stored in `/api/v1/communications/notification-deliveries/`.
+
+```http
+GET /api/v1/communications/notification-deliveries/
+GET /api/v1/communications/notification-deliveries/?notification=1
+GET /api/v1/communications/notification-deliveries/?channel=push
+```
+
+---
+
+## API Testing Flow
+
+# Руководство по тестированию API через Postman
+
+## Базовые настройки
+
+Базовый URL для локального backend:
+
+```text
+http://127.0.0.1:8000
+```
+
+Создайте в Postman environment:
+
+| Variable | Initial value |
+| --- | --- |
+| `base_url` | `http://127.0.0.1:8000` |
+| `access_token` | пусто |
+| `refresh_token` | пусто |
+| `region_id` | id региона, заранее загруженного из GeoNames |
+| `city_id` | id города, заранее загруженного из GeoNames |
+| `geodata_id` | пусто |
+| `organization_id` | пусто |
+| `event_id` | пусто |
+
+Для авторизованных запросов используйте header:
+
+```text
+Authorization: Bearer {{access_token}}
+```
+
+## 1. Регистрация и вход
+
+### Регистрация
+
+```http
+POST {{base_url}}/api/v1/accounts/register/
+Content-Type: application/json
+```
+
+```json
+{
+  "username": "manager",
+  "email": "manager@example.com",
+  "password": "StrongPassword123!",
+  "password_confirm": "StrongPassword123!",
+  "first_name": "Manager",
+  "last_name": "User"
+}
+```
+
+После регистрации пользователь должен подтвердить email кодом из письма.
+
+### Подтверждение email
+
+```http
+POST {{base_url}}/api/v1/accounts/verify-email/
+Content-Type: application/json
+```
+
+```json
+{
+  "email": "manager@example.com",
+  "code": "123456"
+}
+```
+
+### Логин
+
+```http
+POST {{base_url}}/api/v1/accounts/login/
+Content-Type: application/json
+```
+
+```json
+{
+  "email": "manager@example.com",
+  "password": "StrongPassword123!"
+}
+```
+
+В Tests вкладке Postman можно сохранить токены:
+
+```javascript
+const json = pm.response.json();
+pm.environment.set("access_token", json.access);
+pm.environment.set("refresh_token", json.refresh);
+```
+
+## 2. Города и геоданные
+
+Геоданные находятся в общем модуле `common`.
+
+### Получить список регионов
+
+```http
+GET {{base_url}}/api/v1/common/regions/
+```
+
+Регионы нельзя создавать через публичный API. Для поиска региона:
+
+```http
+GET {{base_url}}/api/v1/common/regions/?search=sver
+```
+
+### Получить список городов
+
+```http
+GET {{base_url}}/api/v1/common/cities/
+```
+
+Города нельзя создавать через публичный API. Они заводятся через импорт из GeoNames или через административный backend-процесс. В ответе `region` - id региона, `region_name` - название региона для отображения.
+
+В dev/test базу через migration загружен тестовый набор городов из разных частей России: Kaliningrad, Murmansk, Saint Petersburg, Moscow, Sochi, Yekaterinburg, Novosibirsk, Yakutsk, Vladivostok, Petropavlovsk-Kamchatsky.
+
+### Найти город для autocomplete
+
+```http
+GET {{base_url}}/api/v1/common/cities/?search=vlad
+```
+
+Поиск работает по `name`, `region_name`, `country_code`. Для выбранного города сохраните `id` в переменную `city_id`.
+
+Возьмите `id` нужного города из ответа и сохраните его в `city_id`.
+
+### Создать geodata
+
+Все поля необязательные. Можно указать только город, только улицу, только координаты или любую комбинацию.
+
+```http
+POST {{base_url}}/api/v1/common/geodata/
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+```
+
+```json
+{
+  "city": "{{city_id}}",
+  "street": "ул. Ленина, 1",
+  "latitude": "56.838011",
+  "longitude": "60.597465"
+}
+```
+
+Сохраните `id` в `geodata_id`.
+
+## 3. Геоданные пользователя
+
+```http
+PATCH {{base_url}}/api/v1/accounts/profile/
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+```
+
+```json
+{
+  "geodata": "{{geodata_id}}"
+}
+```
+
+Проверка:
+
+```http
+GET {{base_url}}/api/v1/accounts/profile/
+Authorization: Bearer {{access_token}}
+```
+
+## 4. Геоданные мероприятия
+
+Мероприятие хранит:
+
+- `geodata` - ссылка на `/api/v1/common/geodata/`;
+- `is_online` - флаг онлайн-мероприятия;
+- `city` - старое текстовое поле, пока оставлено для обратной совместимости;
+- `max_url`, `vk_url`, `website_url` - ссылки на конкретные посты или страницу мероприятия.
+
+```http
+POST {{base_url}}/api/v1/organizations/events/
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+```
+
+```json
+{
+  "title": "Сбор вещей",
+  "content": "Описание мероприятия",
+  "category": 1,
+  "organization": "{{organization_id}}",
+  "geodata": "{{geodata_id}}",
+  "is_online": false,
+  "starts_at": "2026-06-01T10:00:00+05:00",
+  "max_url": "https://max.example.com/event-post",
+  "vk_url": "https://vk.com/event-post",
+  "website_url": "https://example.com/events/help"
+}
+```
+
+Для онлайн-мероприятия можно отправить:
+
+```json
+{
+  "title": "Онлайн-встреча волонтёров",
+  "content": "Созвон команды",
+  "category": 1,
+  "organization": "{{organization_id}}",
+  "is_online": true,
+  "starts_at": "2026-06-01T10:00:00+05:00"
+}
+```
+
+`geodata` можно не указывать.
+
+## 5. Проверки ошибок
+
+### Невалидная широта
+
+```http
+POST {{base_url}}/api/v1/common/geodata/
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+```
+
+```json
+{
+  "latitude": "91.000000",
+  "longitude": "60.000000"
+}
+```
+
+Ожидаемый результат: `400 Bad Request`, ошибка по полю `latitude`.
+
+### Невалидная долгота
+
+```json
+{
+  "latitude": "56.000000",
+  "longitude": "181.000000"
+}
+```
+
+Ожидаемый результат: `400 Bad Request`, ошибка по полю `longitude`.
+

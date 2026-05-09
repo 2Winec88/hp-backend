@@ -1,5 +1,6 @@
 from django.db import transaction
 from django.db.models import Count
+from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -35,6 +36,7 @@ from .permissions import (
     IsReadOnlyOrPollOptionManager,
     IsPollVoteOwner,
     IsReadOnlyOrUserItemOwner,
+    is_donor_group_collection_author_or_manager,
 )
 from .serializers import (
     BranchItemSerializer,
@@ -42,6 +44,7 @@ from .serializers import (
     CollectionSerializer,
     CourierProfileSerializer,
     DonorGroupItemSerializer,
+    DonorGroupMeetingSerializer,
     DonorGroupMemberSerializer,
     DonorGroupSerializer,
     ItemCategorySerializer,
@@ -183,6 +186,10 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
             "collection__created_by_member__user",
             "created_by_member",
             "created_by_member__user",
+            "meeting",
+            "meeting__geodata",
+            "meeting__finalized_by_member",
+            "meeting__finalized_by_member__user",
         ).prefetch_related(
             "members",
             "members__user",
@@ -204,6 +211,57 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
             is_active=True,
         )
         serializer.save(created_by_member=member)
+
+    @action(detail=True, methods=["post"], url_path="schedule-meeting")
+    def schedule_meeting(self, request, pk=None):
+        donor_group = self.get_object()
+        if not is_donor_group_collection_author_or_manager(
+            donor_group=donor_group,
+            user=request.user,
+        ):
+            return Response(
+                {"detail": "Only the collection author or an organization manager can schedule a donor group meeting."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        meeting = getattr(donor_group, "meeting", None)
+        serializer = DonorGroupMeetingSerializer(
+            instance=meeting,
+            data=request.data,
+            partial=meeting is not None,
+            context=self.get_serializer_context(),
+        )
+        serializer.is_valid(raise_exception=True)
+        finalized_by_member = OrganizationMember.objects.get(
+            organization=donor_group.collection.organization,
+            user=request.user,
+            is_active=True,
+        )
+        meeting = serializer.save(
+            donor_group=donor_group,
+            finalized_by_member=finalized_by_member,
+            finalized_at=timezone.now(),
+        )
+        self._notify_meeting_scheduled(donor_group=donor_group, meeting=meeting)
+        return Response(DonorGroupMeetingSerializer(meeting).data, status=status.HTTP_200_OK)
+
+    def _notify_meeting_scheduled(self, *, donor_group, meeting):
+        for member in donor_group.members.select_related("user"):
+            if member.user_id == meeting.finalized_by_member.user_id:
+                continue
+            create_notification(
+                recipient=member.user,
+                actor=self.request.user,
+                type="system",
+                title="Donor group meeting scheduled",
+                body=meeting.description or meeting.street or str(meeting.starts_at),
+                payload={
+                    "target_type": "donor_group_meeting",
+                    "target_id": meeting.pk,
+                    "donor_group_id": donor_group.pk,
+                },
+                send_push=True,
+            )
 
 
 class DonorGroupMemberViewSet(viewsets.ModelViewSet):

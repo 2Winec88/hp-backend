@@ -6,8 +6,8 @@
 - Постоянно держи актуальным общий API-гайд для фронтенд-агента: `docs/frontend_agent_api_guide.md`.
 - Если изменение влияет на контракты API, сценарии пользователя, форматы payload/response, права доступа или маршруты, обновляй `docs/frontend_agent_api_guide.md` в рамках той же задачи.
 - Если изменение относится к геоданным, дополнительно обновляй специализированную инструкцию: `docs/frontend_agent_geodata_instructions.md`.
-- Постоянно держи актуальной инструкцию для тестирования API через Postman: `docs/postman_api_testing_guide.md`.
-- Если добавлены, удалены или изменены endpoints, обязательные/необязательные поля, статусы ответов, авторизация или порядок проверки сценариев, обновляй Postman-инструкцию в рамках той же задачи.
+- Postman/API testing flow теперь хранится в `docs/frontend_agent_api_guide.md`; обновляй его там же.
+- Если добавлены, удалены или изменены endpoints, обязательные/необязательные поля, статусы ответов, авторизация или порядок проверки сценариев, обновляй соответствующий раздел единого API-гайда в рамках той же задачи.
 - Если документацию не нужно менять, кратко укажи это в финальном ответе.
 - Перед финальным ответом запускай релевантные тесты и `python manage.py check`, если изменения затрагивали код.
 - Do not read `docs/geonames_data.txt` fully. It is a large GeoNames dump; inspect it only with bounded commands such as `Get-Content -TotalCount`, `Select-String`, `rg`, or streaming import scripts.

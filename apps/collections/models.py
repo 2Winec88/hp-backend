@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 
 class ItemCategory(models.Model):
@@ -246,6 +247,48 @@ class DonorGroup(models.Model):
             raise ValidationError(
                 {"created_by_member": "Creator must be a member of the collection organization."}
             )
+
+
+class DonorGroupMeeting(models.Model):
+    donor_group = models.OneToOneField(
+        DonorGroup,
+        on_delete=models.CASCADE,
+        related_name="meeting",
+    )
+    geodata = models.ForeignKey(
+        "common.GeoData",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="donor_group_meetings",
+    )
+    street = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField(null=True, blank=True)
+    finalized_by_member = models.ForeignKey(
+        "organizations.OrganizationMember",
+        on_delete=models.PROTECT,
+        related_name="finalized_donor_group_meetings",
+    )
+    finalized_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Donor group meeting"
+        verbose_name_plural = "Donor group meetings"
+        ordering = ("-finalized_at", "-id")
+
+    def __str__(self):
+        return f"{self.donor_group} meeting at {self.starts_at}"
+
+    def clean(self):
+        super().clean()
+        if self.ends_at and self.ends_at < self.starts_at:
+            raise ValidationError({"ends_at": "End date cannot be earlier than start date."})
+        if not (self.geodata_id or self.street or self.description):
+            raise ValidationError({"geodata": "Meeting requires place data."})
 
 
 class DonorGroupMember(models.Model):

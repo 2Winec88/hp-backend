@@ -7,6 +7,7 @@ from .models import (
     CourierProfile,
     DonorGroup,
     DonorGroupItem,
+    DonorGroupMeeting,
     DonorGroupMember,
     Item,
     ItemCategory,
@@ -76,11 +77,17 @@ class DonorGroupItemInline(admin.TabularInline):
     extra = 0
 
 
+class DonorGroupMeetingInline(admin.StackedInline):
+    model = DonorGroupMeeting
+    extra = 0
+    max_num = 1
+
+
 @admin.register(DonorGroup)
 class DonorGroupAdmin(admin.ModelAdmin):
     list_display = ("id", "collection", "title", "created_by_member", "created_at")
     search_fields = ("title", "collection__title")
-    inlines = (DonorGroupMemberInline, DonorGroupItemInline)
+    inlines = (DonorGroupMemberInline, DonorGroupItemInline, DonorGroupMeetingInline)
 
 
 @admin.register(DonorGroupMember)
@@ -97,6 +104,13 @@ class DonorGroupItemAdmin(admin.ModelAdmin):
         "user_item__user__email",
         "user_item__category__name",
     )
+
+
+@admin.register(DonorGroupMeeting)
+class DonorGroupMeetingAdmin(admin.ModelAdmin):
+    list_display = ("donor_group", "starts_at", "street", "finalized_by_member", "finalized_at")
+    search_fields = ("donor_group__title", "street", "description")
+    autocomplete_fields = ("donor_group", "geodata", "finalized_by_member")
 
 
 @admin.register(CourierProfile)
