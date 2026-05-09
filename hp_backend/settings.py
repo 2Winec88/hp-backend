@@ -36,6 +36,12 @@ ALLOWED_HOSTS = config(
     cast=lambda value: [item.strip() for item in value.split(',') if item.strip()],
 )
 
+CORS_ALLOWED_ORIGINS = config(
+    'CORS_ALLOWED_ORIGINS',
+    default='http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:5173,http://localhost:5173',
+    cast=lambda value: [item.strip() for item in value.split(',') if item.strip()],
+)
+
 
 # Application definition
 
@@ -70,6 +76,7 @@ INSTALLED_APPS = ['daphne'] + DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'debug_toolbar.middleware.DebugToolbarMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
