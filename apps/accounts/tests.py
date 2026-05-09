@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
@@ -141,3 +142,28 @@ class ProfileGeoDataTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         user.refresh_from_db()
         self.assertEqual(user.geodata, geodata)
+
+    def test_profile_avatar_rejects_non_image_file(self):
+        user = get_user_model().objects.create_user(
+            username="avatar-profile",
+            email="avatar-profile@example.com",
+            password="StrongPassword123!",
+            is_active=True,
+            is_email_verified=True,
+        )
+        self.client.force_authenticate(user)
+
+        response = self.client.patch(
+            self.profile_url,
+            data={
+                "avatar": SimpleUploadedFile(
+                    "avatar.txt",
+                    b"plain text",
+                    content_type="text/plain",
+                )
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("avatar", response.data)

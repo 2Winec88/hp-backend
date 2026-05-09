@@ -11,6 +11,7 @@ from .models import (
     OrganizationNews,
     OrganizationNewsComment,
     OrganizationNewsImage,
+    OrganizationReportDocument,
     OrganizationRegistrationRequest,
 )
 
@@ -142,6 +143,13 @@ class OrganizationNewsCommentAdmin(admin.ModelAdmin):
     list_display = ("news", "created_by", "created_at", "updated_at")
     search_fields = ("text", "news__title", "created_by__email")
     autocomplete_fields = ("news", "created_by")
+
+
+@admin.register(OrganizationReportDocument)
+class OrganizationReportDocumentAdmin(admin.ModelAdmin):
+    list_display = ("organization", "title", "created_by_member", "created_at")
+    search_fields = ("organization__official_name", "title", "description")
+    autocomplete_fields = ("organization", "created_by_member")
 
 
 @admin.register(OrganizationRegistrationRequest)

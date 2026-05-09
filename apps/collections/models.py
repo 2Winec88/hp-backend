@@ -4,6 +4,12 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
+from apps.common.file_validators import video_file_validators
+
+
+def donor_group_video_report_upload_to(instance, filename):
+    return f"donor-groups/{instance.donor_group_id or 'new'}/video-reports/{filename}"
+
 
 class ItemCategory(models.Model):
     class Unit(models.TextChoices):
@@ -249,43 +255,43 @@ class DonorGroup(models.Model):
             )
 
 
-class DonorGroupMeeting(models.Model):
+class DonorGroupParameters(models.Model):
     donor_group = models.OneToOneField(
         DonorGroup,
         on_delete=models.CASCADE,
-        related_name="meeting",
+        related_name="parameters",
     )
     geodata = models.ForeignKey(
         "common.GeoData",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="donor_group_meetings",
+        related_name="donor_group_parameters",
     )
     street = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
-    starts_at = models.DateTimeField()
+    starts_at = models.DateTimeField(null=True, blank=True)
     ends_at = models.DateTimeField(null=True, blank=True)
     finalized_by_member = models.ForeignKey(
         "organizations.OrganizationMember",
         on_delete=models.PROTECT,
-        related_name="finalized_donor_group_meetings",
+        related_name="finalized_donor_group_parameters",
     )
     finalized_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Donor group meeting"
-        verbose_name_plural = "Donor group meetings"
+        verbose_name = "Donor group parameters"
+        verbose_name_plural = "Donor group parameters"
         ordering = ("-finalized_at", "-id")
 
     def __str__(self):
-        return f"{self.donor_group} meeting at {self.starts_at}"
+        return f"{self.donor_group} parameters"
 
     def clean(self):
         super().clean()
-        if self.ends_at and self.ends_at < self.starts_at:
+        if self.starts_at and self.ends_at and self.ends_at < self.starts_at:
             raise ValidationError({"ends_at": "End date cannot be earlier than start date."})
 
 
@@ -396,6 +402,21 @@ class Poll(models.Model):
         blank=True,
         related_name="reposted_polls",
     )
+    finalized_option = models.ForeignKey(
+        "PollOption",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="finalized_polls",
+    )
+    finalized_by_member = models.ForeignKey(
+        "organizations.OrganizationMember",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="finalized_polls",
+    )
+    finalized_at = models.DateTimeField(null=True, blank=True)
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.TEXT)
@@ -562,3 +583,32 @@ class PollVote(models.Model):
         super().clean()
         if self.option_id and self.poll_id and self.option.poll_id != self.poll_id:
             raise ValidationError({"option": "Option must belong to the selected poll."})
+
+
+class DonorGroupVideoReport(models.Model):
+    donor_group = models.ForeignKey(
+        DonorGroup,
+        on_delete=models.CASCADE,
+        related_name="video_reports",
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="donor_group_video_reports",
+    )
+    title = models.CharField(max_length=200, blank=True)
+    description = models.TextField(blank=True)
+    video = models.FileField(
+        upload_to=donor_group_video_report_upload_to,
+        validators=video_file_validators,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Donor group video report"
+        verbose_name_plural = "Donor group video reports"
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return self.title or f"{self.donor_group} video report #{self.pk}"

@@ -6,8 +6,9 @@ from .models import (
     CollectionItem,
     DonorGroup,
     DonorGroupItem,
-    DonorGroupMeeting,
+    DonorGroupParameters,
     DonorGroupMember,
+    DonorGroupVideoReport,
     Item,
     ItemCategory,
     MeetingPlaceProposal,
@@ -76,8 +77,8 @@ class DonorGroupItemInline(admin.TabularInline):
     extra = 0
 
 
-class DonorGroupMeetingInline(admin.StackedInline):
-    model = DonorGroupMeeting
+class DonorGroupParametersInline(admin.StackedInline):
+    model = DonorGroupParameters
     extra = 0
     max_num = 1
 
@@ -86,7 +87,7 @@ class DonorGroupMeetingInline(admin.StackedInline):
 class DonorGroupAdmin(admin.ModelAdmin):
     list_display = ("id", "collection", "title", "created_by_member", "created_at")
     search_fields = ("title", "collection__title")
-    inlines = (DonorGroupMemberInline, DonorGroupItemInline, DonorGroupMeetingInline)
+    inlines = (DonorGroupMemberInline, DonorGroupItemInline, DonorGroupParametersInline)
 
 
 @admin.register(DonorGroupMember)
@@ -105,11 +106,18 @@ class DonorGroupItemAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(DonorGroupMeeting)
-class DonorGroupMeetingAdmin(admin.ModelAdmin):
+@admin.register(DonorGroupParameters)
+class DonorGroupParametersAdmin(admin.ModelAdmin):
     list_display = ("donor_group", "starts_at", "street", "finalized_by_member", "finalized_at")
     search_fields = ("donor_group__title", "street", "description")
     autocomplete_fields = ("donor_group", "geodata", "finalized_by_member")
+
+
+@admin.register(DonorGroupVideoReport)
+class DonorGroupVideoReportAdmin(admin.ModelAdmin):
+    list_display = ("donor_group", "uploaded_by", "title", "created_at")
+    search_fields = ("donor_group__title", "uploaded_by__email", "title", "description")
+    autocomplete_fields = ("donor_group", "uploaded_by")
 
 
 class PollOptionInline(admin.TabularInline):

@@ -21,12 +21,13 @@ from .models import (
     OrganizationNews,
     OrganizationNewsComment,
     OrganizationNewsImage,
+    OrganizationReportDocument,
     OrganizationRegistrationRequest,
 )
 
 
 def create_test_file(name):
-    return SimpleUploadedFile(name, b"file-content", content_type="application/pdf")
+    return SimpleUploadedFile(name, b"%PDF-1.4\n%test\n", content_type="application/pdf")
 
 
 def create_test_image_file(name="image.gif"):
@@ -326,6 +327,7 @@ class OrganizationAdministrationApiTests(APITestCase):
     branch_images_url = "/api/v1/organizations/branch-images/"
     event_images_url = "/api/v1/organizations/event-images/"
     news_images_url = "/api/v1/organizations/news-images/"
+    report_documents_url = "/api/v1/organizations/report-documents/"
 
     def setUp(self):
         self.user_model = get_user_model()
@@ -958,6 +960,64 @@ class OrganizationAdministrationApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         image.refresh_from_db()
         self.assertEqual(image.news, first_news)
+
+    def test_manager_can_publish_pdf_report_document(self):
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.post(
+            self.report_documents_url,
+            data={
+                "organization": self.organization.pk,
+                "title": "Monthly report",
+                "description": "Published report",
+                "document": create_test_file("monthly-report.pdf"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        report = OrganizationReportDocument.objects.get(pk=response.data["id"])
+        self.assertEqual(report.organization, self.organization)
+        self.assertEqual(report.created_by_member, self.manager_membership)
+
+        public_response = self.client.get(self.report_documents_url)
+        self.assertEqual(public_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(public_response.data[0]["title"], "Monthly report")
+
+    def test_non_manager_cannot_publish_pdf_report_document(self):
+        self.client.force_authenticate(self.member_user)
+
+        response = self.client.post(
+            self.report_documents_url,
+            data={
+                "organization": self.organization.pk,
+                "title": "No access",
+                "document": create_test_file("no-access.pdf"),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_report_document_rejects_non_pdf_file(self):
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.post(
+            self.report_documents_url,
+            data={
+                "organization": self.organization.pk,
+                "title": "Wrong file",
+                "document": SimpleUploadedFile(
+                    "report.txt",
+                    b"plain text",
+                    content_type="text/plain",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("document", response.data)
 
 
 class OrganizationRegistrationRequestApiTests(APITestCase):

@@ -3,6 +3,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.text import slugify
 
+from apps.common.file_validators import image_file_validators, pdf_file_validators
+
 def organization_document_upload_to(instance, filename):
     return f"organizations/{instance.pk or 'new'}/{filename}"
 
@@ -20,6 +22,10 @@ def organization_news_image_upload_to(instance, filename):
 
 def organization_news_gallery_image_upload_to(instance, filename):
     return f"organizations/{instance.news.organization_id or 'new'}/news/{instance.news_id or 'new'}/images/{filename}"
+
+
+def organization_report_document_upload_to(instance, filename):
+    return f"organizations/{instance.organization_id or 'new'}/reports/{filename}"
 
 
 def organization_branch_image_upload_to(instance, filename):
@@ -204,6 +210,7 @@ class OrganizationBranchImage(models.Model):
     )
     image = models.ImageField(
         upload_to=organization_branch_image_upload_to,
+        validators=image_file_validators,
         verbose_name="Image",
     )
     alt_text = models.CharField(
@@ -246,6 +253,7 @@ class Event(models.Model):
         upload_to="events/",
         blank=True,
         null=True,
+        validators=image_file_validators,
         verbose_name="Изображение",
     )
     category = models.ForeignKey(
@@ -328,6 +336,7 @@ class EventImage(models.Model):
     )
     image = models.ImageField(
         upload_to=event_image_upload_to,
+        validators=image_file_validators,
         verbose_name="Изображение",
     )
     alt_text = models.CharField(
@@ -373,6 +382,7 @@ class OrganizationNews(models.Model):
         upload_to=organization_news_image_upload_to,
         blank=True,
         null=True,
+        validators=image_file_validators,
         verbose_name="Изображение",
     )
     comments = models.TextField(blank=True, verbose_name="Комментарии")
@@ -410,6 +420,7 @@ class OrganizationNewsImage(models.Model):
     )
     image = models.ImageField(
         upload_to=organization_news_gallery_image_upload_to,
+        validators=image_file_validators,
         verbose_name="Изображение",
     )
     alt_text = models.CharField(
@@ -460,6 +471,36 @@ class OrganizationNewsComment(models.Model):
         return f"{self.created_by} - {self.news}"
 
 
+class OrganizationReportDocument(models.Model):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="report_documents",
+    )
+    created_by_member = models.ForeignKey(
+        OrganizationMember,
+        on_delete=models.CASCADE,
+        related_name="created_report_documents",
+    )
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    document = models.FileField(
+        upload_to=organization_report_document_upload_to,
+        validators=pdf_file_validators,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "organization_report_documents"
+        verbose_name = "Organization report document"
+        verbose_name_plural = "Organization report documents"
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.organization} - {self.title}"
+
+
 class OrganizationRegistrationRequest(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "На рассмотрении"
@@ -503,30 +544,37 @@ class OrganizationRegistrationRequest(models.Model):
     # Документы
     charter_document = models.FileField(
         upload_to=organization_request_document_upload_to,
+        validators=pdf_file_validators,
         verbose_name="Устав",
     )
     inn_certificate = models.FileField(
         upload_to=organization_request_document_upload_to,
+        validators=pdf_file_validators,
         verbose_name="Свидетельство о присвоении ИНН",
     )
     state_registration_certificate = models.FileField(
         upload_to=organization_request_document_upload_to,
+        validators=pdf_file_validators,
         verbose_name="Свидетельство о гос регистрации ЮЛ / Свидетельство о регистрации НКО",
     )
     founders_appointment_decision = models.FileField(
         upload_to=organization_request_document_upload_to,
+        validators=pdf_file_validators,
         verbose_name="Решение учредителей о назначении высшего коллегиального и исполнительного органа",
     )
     executive_passport_copy = models.FileField(
         upload_to=organization_request_document_upload_to,
+        validators=pdf_file_validators,
         verbose_name="Копия паспорта лица, осуществляющего функции единоличного исполнительного органа",
     )
     egrul_extract = models.FileField(
         upload_to=organization_request_document_upload_to,
+        validators=pdf_file_validators,
         verbose_name="Выписка из ЕГРЮЛ",
     )
     nko_registry_notice = models.FileField(
         upload_to=organization_request_document_upload_to,
+        validators=pdf_file_validators,
         verbose_name="Уведомление о включении в реестр НКО / Письмо-подтверждение о не включении",
     )
     created_by = models.ForeignKey(

@@ -8,6 +8,7 @@ from .views import (
     CourierProfileViewSet,
     DonorGroupItemViewSet,
     DonorGroupMemberViewSet,
+    DonorGroupVideoReportViewSet,
     DonorGroupViewSet,
     ItemCategoryViewSet,
     MeetingPlaceProposalViewSet,
@@ -26,6 +27,7 @@ router.register("branch-items", BranchItemViewSet, basename="branch-item")
 router.register("donor-groups", DonorGroupViewSet, basename="donor-group")
 router.register("donor-group-members", DonorGroupMemberViewSet, basename="donor-group-member")
 router.register("donor-group-items", DonorGroupItemViewSet, basename="donor-group-item")
+router.register("donor-group-video-reports", DonorGroupVideoReportViewSet, basename="donor-group-video-report")
 router.register("courier-profiles", CourierProfileViewSet, basename="courier-profile")
 router.register("meeting-place-proposals", MeetingPlaceProposalViewSet, basename="meeting-place-proposal")
 router.register("polls", PollViewSet, basename="poll")

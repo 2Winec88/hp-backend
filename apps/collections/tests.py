@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -22,8 +23,9 @@ from .models import (
     CollectionItem,
     DonorGroup,
     DonorGroupItem,
-    DonorGroupMeeting,
+    DonorGroupParameters,
     DonorGroupMember,
+    DonorGroupVideoReport,
     ItemCategory,
     MeetingPlaceProposal,
     Poll,
@@ -428,7 +430,7 @@ class CollectionPermissionTests(TestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_collection_author_can_schedule_donor_group_meeting_manually(self):
+    def test_collection_author_can_schedule_donor_group_parameters_manually(self):
         collection = Collection.objects.create(
             organization=self.organization,
             created_by_member=self.member_membership,
@@ -456,14 +458,14 @@ class CollectionPermissionTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        meeting = DonorGroupMeeting.objects.get(donor_group=donor_group)
+        meeting = DonorGroupParameters.objects.get(donor_group=donor_group)
         self.assertEqual(meeting.geodata, geodata)
         self.assertEqual(meeting.street, "Lenina, 1")
         self.assertEqual(meeting.finalized_by_member, self.member_membership)
         notification_events = set(
             Notification.objects.filter(
                 recipient=self.donor,
-                payload__target_type="donor_group_meeting",
+                payload__target_type="donor_group_parameters",
                 payload__target_id=meeting.id,
             ).values_list("payload__event", flat=True)
         )
@@ -474,12 +476,12 @@ class CollectionPermissionTests(TestCase):
         self.assertTrue(
             Notification.objects.filter(
                 recipient=self.donor,
-                payload__target_type="donor_group_meeting",
+                payload__target_type="donor_group_parameters",
                 payload__target_id=meeting.id,
             ).exists()
         )
 
-    def test_donor_group_meeting_can_be_rescheduled_without_poll_options(self):
+    def test_donor_group_parameters_can_be_rescheduled_without_poll_options(self):
         collection = Collection.objects.create(
             organization=self.organization,
             created_by_member=self.member_membership,
@@ -490,7 +492,7 @@ class CollectionPermissionTests(TestCase):
             created_by_member=self.member_membership,
         )
         starts_at = timezone.now() + timedelta(days=2)
-        meeting = DonorGroupMeeting.objects.create(
+        meeting = DonorGroupParameters.objects.create(
             donor_group=donor_group,
             street="Old place",
             starts_at=starts_at,
@@ -512,7 +514,7 @@ class CollectionPermissionTests(TestCase):
         self.assertEqual(meeting.street, "New place")
         self.assertEqual(meeting.finalized_by_member, self.manager_membership)
 
-    def test_collection_author_can_schedule_donor_group_meeting_time_without_place(self):
+    def test_collection_author_can_schedule_donor_group_parameters_time_without_place(self):
         collection = Collection.objects.create(
             organization=self.organization,
             created_by_member=self.member_membership,
@@ -536,14 +538,14 @@ class CollectionPermissionTests(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        meeting = DonorGroupMeeting.objects.get(donor_group=donor_group)
+        meeting = DonorGroupParameters.objects.get(donor_group=donor_group)
         self.assertEqual(meeting.finalized_by_member, self.member_membership)
         self.assertEqual(meeting.street, "")
         self.assertIsNone(meeting.geodata)
         notification_events = set(
             Notification.objects.filter(
                 recipient=self.donor,
-                payload__target_type="donor_group_meeting",
+                payload__target_type="donor_group_parameters",
                 payload__target_id=meeting.id,
             ).values_list("payload__event", flat=True)
         )
@@ -551,12 +553,12 @@ class CollectionPermissionTests(TestCase):
         self.assertTrue(
             Notification.objects.filter(
                 recipient=self.donor,
-                payload__target_type="donor_group_meeting",
+                payload__target_type="donor_group_parameters",
                 payload__target_id=meeting.id,
             ).exists()
         )
 
-    def test_manager_can_update_donor_group_meeting_time_without_changing_place(self):
+    def test_collection_author_can_set_donor_group_parameters_time_alias(self):
         collection = Collection.objects.create(
             organization=self.organization,
             created_by_member=self.member_membership,
@@ -567,7 +569,33 @@ class CollectionPermissionTests(TestCase):
             created_by_member=self.member_membership,
         )
         starts_at = timezone.now() + timedelta(days=2)
-        meeting = DonorGroupMeeting.objects.create(
+
+        self.client.force_authenticate(user=self.member)
+        response = self.client.post(
+            reverse("donor-group-set-parameters-time", args=(donor_group.id,)),
+            {"starts_at": starts_at.isoformat()},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            DonorGroupParameters.objects.filter(
+                donor_group=donor_group,
+                starts_at=starts_at,
+            ).exists()
+        )
+
+    def test_manager_can_update_donor_group_parameters_time_without_changing_place(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        starts_at = timezone.now() + timedelta(days=2)
+        meeting = DonorGroupParameters.objects.create(
             donor_group=donor_group,
             street="Old place",
             starts_at=starts_at,
@@ -589,7 +617,7 @@ class CollectionPermissionTests(TestCase):
         self.assertEqual(meeting.starts_at, new_starts_at)
         self.assertEqual(meeting.finalized_by_member, self.manager_membership)
 
-    def test_non_manager_cannot_schedule_donor_group_meeting_time(self):
+    def test_non_manager_cannot_schedule_donor_group_parameters_time(self):
         collection = Collection.objects.create(
             organization=self.organization,
             created_by_member=self.member_membership,
@@ -610,7 +638,7 @@ class CollectionPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_non_manager_cannot_schedule_donor_group_meeting(self):
+    def test_non_manager_cannot_schedule_donor_group_parameters(self):
         collection = Collection.objects.create(
             organization=self.organization,
             created_by_member=self.member_membership,
@@ -826,3 +854,193 @@ class CollectionPermissionTests(TestCase):
         new_poll = Poll.objects.get(pk=repost_response.data["id"])
         self.assertEqual(new_poll.source_poll, poll)
         self.assertEqual(list(new_poll.options.values_list("text", flat=True)), ["Keep"])
+
+    def test_frontend_item_aggregates_include_selected_quantities(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        CollectionItem.objects.create(
+            collection=collection,
+            category=self.category,
+            quantity_required=10,
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+        user_item = UserItem.objects.create(
+            user=self.donor,
+            category=self.category,
+            quantity=7,
+        )
+        DonorGroupItem.objects.create(
+            donor_group=donor_group,
+            user_item=user_item,
+            quantity=3,
+        )
+
+        collection_response = self.client.get(reverse("collection-detail", args=(collection.id,)))
+        item_response = self.client.get(reverse("collection-item-list"), {"collection": collection.id})
+        user_item_response = self.client.get(
+            reverse("user-item-detail", args=(user_item.id,)),
+            {"collection": collection.id},
+        )
+
+        self.assertEqual(collection_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(collection_response.data["quantity_required_total"], 10)
+        self.assertEqual(collection_response.data["quantity_selected_total"], 3)
+        self.assertEqual(collection_response.data["donor_groups_count"], 1)
+        self.assertEqual(collection_response.data["donor_group_members_count"], 1)
+        self.assertEqual(collection_response.data["donor_group_items_count"], 1)
+        self.assertEqual(item_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(item_response.data[0]["selected_quantity"], 3)
+        self.assertEqual(item_response.data[0]["remaining_quantity"], 7)
+        self.assertEqual(user_item_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(user_item_response.data["selected_quantity"], 3)
+        self.assertEqual(user_item_response.data["available_quantity"], 4)
+
+    def test_manager_finalizes_place_and_date_poll_options_into_meeting(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+        place_poll = Poll.objects.create(
+            donor_group=donor_group,
+            created_by_member=self.member_membership,
+            title="Place",
+            kind=Poll.Kind.PLACE,
+        )
+        place_option = PollOption.objects.create(
+            poll=place_poll,
+            place_street="Lenina, 1",
+            place_description="Entrance",
+        )
+        date_poll = Poll.objects.create(
+            donor_group=donor_group,
+            created_by_member=self.member_membership,
+            title="Date",
+            kind=Poll.Kind.DATE,
+        )
+        starts_at = timezone.now() + timedelta(days=2)
+        date_option = PollOption.objects.create(poll=date_poll, starts_at=starts_at)
+
+        self.client.force_authenticate(user=self.manager)
+        place_response = self.client.post(
+            reverse("poll-finalize", args=(place_poll.id,)),
+            {"option": place_option.id},
+        )
+        date_response = self.client.post(
+            reverse("poll-finalize", args=(date_poll.id,)),
+            {"option": date_option.id},
+        )
+
+        self.assertEqual(place_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(date_response.status_code, status.HTTP_200_OK)
+        place_poll.refresh_from_db()
+        date_poll.refresh_from_db()
+        meeting = DonorGroupParameters.objects.get(donor_group=donor_group)
+        self.assertEqual(place_poll.status, Poll.Status.CLOSED)
+        self.assertEqual(place_poll.finalized_option, place_option)
+        self.assertEqual(date_poll.status, Poll.Status.CLOSED)
+        self.assertEqual(date_poll.finalized_option, date_option)
+        self.assertEqual(meeting.street, "Lenina, 1")
+        self.assertEqual(meeting.description, "Entrance")
+        self.assertEqual(meeting.starts_at, starts_at)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.donor,
+                payload__event="place_assigned",
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.donor,
+                payload__event="date_assigned",
+            ).exists()
+        )
+
+    def test_donor_group_member_can_upload_video_report(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+
+        self.client.force_authenticate(user=self.donor)
+        response = self.client.post(
+            reverse("donor-group-video-report-list"),
+            {
+                "donor_group": donor_group.id,
+                "title": "Report",
+                "video": SimpleUploadedFile(
+                    "report.mp4",
+                    b"video-content",
+                    content_type="video/mp4",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        report = DonorGroupVideoReport.objects.get(pk=response.data["id"])
+        self.assertEqual(report.uploaded_by, self.donor)
+
+        self.client.force_authenticate(user=self.other)
+        forbidden_response = self.client.post(
+            reverse("donor-group-video-report-list"),
+            {
+                "donor_group": donor_group.id,
+                "title": "No access",
+                "video": SimpleUploadedFile(
+                    "outsider.mp4",
+                    b"video-content",
+                    content_type="video/mp4",
+                ),
+            },
+            format="multipart",
+        )
+        self.assertEqual(forbidden_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_video_report_rejects_non_video_file(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+
+        self.client.force_authenticate(user=self.donor)
+        response = self.client.post(
+            reverse("donor-group-video-report-list"),
+            {
+                "donor_group": donor_group.id,
+                "title": "Wrong file",
+                "video": SimpleUploadedFile(
+                    "report.txt",
+                    b"plain text",
+                    content_type="text/plain",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("video", response.data)

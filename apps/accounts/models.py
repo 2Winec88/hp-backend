@@ -2,12 +2,19 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
 
+from apps.common.file_validators import image_file_validators
+
 import secrets
 
 
 class User(AbstractUser):
     email = models.EmailField(unique=True)
-    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+    avatar = models.ImageField(
+        upload_to="avatars/",
+        blank=True,
+        null=True,
+        validators=image_file_validators,
+    )
     bio = models.TextField(max_length=500, blank=True)
     is_email_verified = models.BooleanField(default=False)
     geodata = models.ForeignKey(

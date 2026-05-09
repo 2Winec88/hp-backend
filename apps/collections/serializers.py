@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.db.models import Sum
 
 from apps.accounts.models import CourierProfile
 from apps.organizations.models import OrganizationMember
@@ -10,8 +11,9 @@ from .models import (
     CollectionItem,
     DonorGroup,
     DonorGroupItem,
-    DonorGroupMeeting,
+    DonorGroupParameters,
     DonorGroupMember,
+    DonorGroupVideoReport,
     ItemCategory,
     MeetingPlaceProposal,
     Poll,
@@ -45,6 +47,8 @@ class ItemCategorySerializer(serializers.ModelSerializer):
 class UserItemSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
+    selected_quantity = serializers.SerializerMethodField()
+    available_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = UserItem
@@ -55,15 +59,39 @@ class UserItemSerializer(serializers.ModelSerializer):
             "category",
             "category_name",
             "quantity",
+            "selected_quantity",
+            "available_quantity",
             "description",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "user", "user_email", "category_name", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "user",
+            "user_email",
+            "category_name",
+            "selected_quantity",
+            "available_quantity",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_selected_quantity(self, obj):
+        queryset = obj.donor_group_items.all()
+        request = self.context.get("request")
+        collection_id = getattr(request, "query_params", {}).get("collection") if request else None
+        if collection_id:
+            queryset = queryset.filter(donor_group__collection_id=collection_id)
+        return queryset.aggregate(total=Sum("quantity"))["total"] or 0
+
+    def get_available_quantity(self, obj):
+        return max(obj.quantity - self.get_selected_quantity(obj), 0)
 
 
 class CollectionItemSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
+    selected_quantity = serializers.SerializerMethodField()
+    remaining_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = CollectionItem
@@ -73,11 +101,31 @@ class CollectionItemSerializer(serializers.ModelSerializer):
             "category",
             "category_name",
             "quantity_required",
+            "selected_quantity",
+            "remaining_quantity",
             "description",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "category_name", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "category_name",
+            "selected_quantity",
+            "remaining_quantity",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_selected_quantity(self, obj):
+        return DonorGroupItem.objects.filter(
+            donor_group__collection=obj.collection,
+            user_item__category=obj.category,
+        ).aggregate(total=Sum("quantity"))["total"] or 0
+
+    def get_remaining_quantity(self, obj):
+        if obj.quantity_required is None:
+            return None
+        return max(obj.quantity_required - self.get_selected_quantity(obj), 0)
 
     def validate_collection(self, collection):
         request = self.context.get("request")
@@ -99,6 +147,11 @@ class CollectionSerializer(serializers.ModelSerializer):
     organization_name = serializers.CharField(source="organization.official_name", read_only=True)
     items = CollectionItemSerializer(many=True, read_only=True)
     items_count = serializers.SerializerMethodField()
+    quantity_required_total = serializers.SerializerMethodField()
+    quantity_selected_total = serializers.SerializerMethodField()
+    donor_groups_count = serializers.SerializerMethodField()
+    donor_group_members_count = serializers.SerializerMethodField()
+    donor_group_items_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -116,6 +169,11 @@ class CollectionSerializer(serializers.ModelSerializer):
             "ends_at",
             "items",
             "items_count",
+            "quantity_required_total",
+            "quantity_selected_total",
+            "donor_groups_count",
+            "donor_group_members_count",
+            "donor_group_items_count",
             "created_at",
             "updated_at",
         )
@@ -125,12 +183,34 @@ class CollectionSerializer(serializers.ModelSerializer):
             "created_by_member",
             "items",
             "items_count",
+            "quantity_required_total",
+            "quantity_selected_total",
+            "donor_groups_count",
+            "donor_group_members_count",
+            "donor_group_items_count",
             "created_at",
             "updated_at",
         )
 
     def get_items_count(self, obj):
         return obj.items.count()
+
+    def get_quantity_required_total(self, obj):
+        return obj.items.aggregate(total=Sum("quantity_required"))["total"] or 0
+
+    def get_quantity_selected_total(self, obj):
+        return DonorGroupItem.objects.filter(
+            donor_group__collection=obj,
+        ).aggregate(total=Sum("quantity"))["total"] or 0
+
+    def get_donor_groups_count(self, obj):
+        return obj.donor_groups.count()
+
+    def get_donor_group_members_count(self, obj):
+        return DonorGroupMember.objects.filter(donor_group__collection=obj).count()
+
+    def get_donor_group_items_count(self, obj):
+        return DonorGroupItem.objects.filter(donor_group__collection=obj).count()
 
     def validate_organization(self, organization):
         request = self.context.get("request")
@@ -290,11 +370,11 @@ class DonorGroupItemSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class DonorGroupMeetingSerializer(serializers.ModelSerializer):
+class DonorGroupParametersSerializer(serializers.ModelSerializer):
     finalized_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
-        model = DonorGroupMeeting
+        model = DonorGroupParameters
         fields = (
             "id",
             "donor_group",
@@ -323,13 +403,13 @@ class DonorGroupMeetingSerializer(serializers.ModelSerializer):
         description = attrs.get("description", getattr(self.instance, "description", ""))
         if not (geodata or street or description):
             raise serializers.ValidationError(
-                {"geodata": "Meeting requires place data."}
+                {"geodata": "Parameters require place data."}
             )
 
         starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
         ends_at = attrs.get("ends_at", getattr(self.instance, "ends_at", None))
         if starts_at is None:
-            raise serializers.ValidationError({"starts_at": "Meeting requires starts_at."})
+            raise serializers.ValidationError({"starts_at": "Parameters require starts_at."})
         if ends_at and ends_at < starts_at:
             raise serializers.ValidationError(
                 {"ends_at": "End date cannot be earlier than start date."}
@@ -337,9 +417,9 @@ class DonorGroupMeetingSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class DonorGroupMeetingTimeSerializer(serializers.ModelSerializer):
+class DonorGroupParametersTimeSerializer(serializers.ModelSerializer):
     class Meta:
-        model = DonorGroupMeeting
+        model = DonorGroupParameters
         fields = (
             "starts_at",
             "ends_at",
@@ -349,7 +429,7 @@ class DonorGroupMeetingTimeSerializer(serializers.ModelSerializer):
         starts_at = attrs.get("starts_at", getattr(self.instance, "starts_at", None))
         ends_at = attrs.get("ends_at", getattr(self.instance, "ends_at", None))
         if starts_at is None:
-            raise serializers.ValidationError({"starts_at": "Meeting requires starts_at."})
+            raise serializers.ValidationError({"starts_at": "Parameters require starts_at."})
         if ends_at and ends_at < starts_at:
             raise serializers.ValidationError(
                 {"ends_at": "End date cannot be earlier than start date."}
@@ -361,9 +441,10 @@ class DonorGroupSerializer(serializers.ModelSerializer):
     created_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
     members = DonorGroupMemberSerializer(many=True, read_only=True)
     items = DonorGroupItemSerializer(many=True, read_only=True)
-    meeting = DonorGroupMeetingSerializer(read_only=True)
+    parameters = DonorGroupParametersSerializer(read_only=True)
     members_count = serializers.SerializerMethodField()
     items_count = serializers.SerializerMethodField()
+    video_reports_count = serializers.SerializerMethodField()
 
     class Meta:
         model = DonorGroup
@@ -374,9 +455,10 @@ class DonorGroupSerializer(serializers.ModelSerializer):
             "title",
             "members",
             "items",
-            "meeting",
+            "parameters",
             "members_count",
             "items_count",
+            "video_reports_count",
             "created_at",
             "updated_at",
         )
@@ -385,9 +467,10 @@ class DonorGroupSerializer(serializers.ModelSerializer):
             "created_by_member",
             "members",
             "items",
-            "meeting",
+            "parameters",
             "members_count",
             "items_count",
+            "video_reports_count",
             "created_at",
             "updated_at",
         )
@@ -397,6 +480,9 @@ class DonorGroupSerializer(serializers.ModelSerializer):
 
     def get_items_count(self, obj):
         return obj.items.count()
+
+    def get_video_reports_count(self, obj):
+        return obj.video_reports.count()
 
     def validate_collection(self, collection):
         request = self.context.get("request")
@@ -558,6 +644,9 @@ class PollSerializer(serializers.ModelSerializer):
             "news",
             "created_by_member",
             "source_poll",
+            "finalized_option",
+            "finalized_by_member",
+            "finalized_at",
             "title",
             "description",
             "kind",
@@ -573,6 +662,9 @@ class PollSerializer(serializers.ModelSerializer):
             "id",
             "created_by_member",
             "source_poll",
+            "finalized_option",
+            "finalized_by_member",
+            "finalized_at",
             "options",
             "options_count",
             "votes_count",
@@ -667,6 +759,24 @@ class PollRepostSerializer(serializers.Serializer):
     closes_at = serializers.DateTimeField(required=False, allow_null=True)
 
 
+class PollFinalizeSerializer(serializers.Serializer):
+    option = serializers.PrimaryKeyRelatedField(queryset=PollOption.objects.all())
+
+    def validate_option(self, option):
+        poll = self.context["poll"]
+        if option.poll_id != poll.id:
+            raise serializers.ValidationError("Option must belong to this poll.")
+        return option
+
+    def validate(self, attrs):
+        poll = self.context["poll"]
+        if not poll.donor_group_id:
+            raise serializers.ValidationError("Only donor group polls can finalize parameters.")
+        if poll.kind not in (Poll.Kind.DATE, Poll.Kind.PLACE):
+            raise serializers.ValidationError("Only date and place polls can finalize parameters.")
+        return attrs
+
+
 class PlaceProposalPollCreateSerializer(serializers.Serializer):
     donor_group = serializers.PrimaryKeyRelatedField(queryset=DonorGroup.objects.all())
     title = serializers.CharField(max_length=200)
@@ -690,3 +800,40 @@ class PlaceProposalPollCreateSerializer(serializers.Serializer):
                 "Only the collection author or manager can create proposal polls."
             )
         return donor_group
+
+
+class DonorGroupVideoReportSerializer(serializers.ModelSerializer):
+    uploaded_by_email = serializers.EmailField(source="uploaded_by.email", read_only=True)
+
+    class Meta:
+        model = DonorGroupVideoReport
+        fields = (
+            "id",
+            "donor_group",
+            "uploaded_by",
+            "uploaded_by_email",
+            "title",
+            "description",
+            "video",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "uploaded_by",
+            "uploaded_by_email",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_donor_group(self, donor_group):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not is_donor_group_member(donor_group=donor_group, user=user):
+            raise serializers.ValidationError("Only donor group members can upload video reports.")
+        return donor_group
+
+    def validate(self, attrs):
+        if self.instance and "donor_group" in attrs and attrs["donor_group"] != self.instance.donor_group:
+            raise serializers.ValidationError({"donor_group": "Donor group cannot be changed."})
+        return attrs

@@ -1,8 +1,9 @@
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
-from rest_framework import serializers, status, viewsets
+from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from apps.accounts.models import CourierProfile
@@ -15,7 +16,9 @@ from .models import (
     CollectionItem,
     DonorGroup,
     DonorGroupItem,
+    DonorGroupParameters,
     DonorGroupMember,
+    DonorGroupVideoReport,
     ItemCategory,
     MeetingPlaceProposal,
     Poll,
@@ -44,19 +47,78 @@ from .serializers import (
     CollectionSerializer,
     CourierProfileSerializer,
     DonorGroupItemSerializer,
-    DonorGroupMeetingSerializer,
-    DonorGroupMeetingTimeSerializer,
+    DonorGroupParametersSerializer,
+    DonorGroupParametersTimeSerializer,
     DonorGroupMemberSerializer,
     DonorGroupSerializer,
+    DonorGroupVideoReportSerializer,
     ItemCategorySerializer,
     MeetingPlaceProposalSerializer,
     PlaceProposalPollCreateSerializer,
+    PollFinalizeSerializer,
     PollOptionSerializer,
     PollRepostSerializer,
     PollSerializer,
     PollVoteSerializer,
     UserItemSerializer,
 )
+
+
+def notify_donor_group_parameters_update(
+    *,
+    request,
+    donor_group,
+    parameters,
+    notify_place=False,
+    notify_date=False,
+    notify_time=False,
+):
+    notifications = []
+    starts_at = timezone.localtime(parameters.starts_at) if parameters.starts_at else None
+    if notify_date and starts_at:
+        notifications.append(
+            (
+                "Donor group parameters date assigned",
+                starts_at.strftime("%d.%m.%Y"),
+                "date_assigned",
+            )
+        )
+    if notify_time and starts_at:
+        body = starts_at.strftime("%H:%M")
+        if parameters.ends_at:
+            body = f"{body}-{timezone.localtime(parameters.ends_at).strftime('%H:%M')}"
+        notifications.append(
+            ("Donor group parameters time assigned", body, "time_assigned")
+        )
+    if notify_place:
+        notifications.append(
+            (
+                "Donor group parameters place assigned",
+                parameters.description or parameters.street or str(parameters.geodata),
+                "place_assigned",
+            )
+        )
+    if not notifications:
+        return
+
+    for member in donor_group.members.select_related("user"):
+        if member.user_id == parameters.finalized_by_member.user_id:
+            continue
+        for title, body, event in notifications:
+            create_notification(
+                recipient=member.user,
+                actor=request.user,
+                type="system",
+                title=title,
+                body=body,
+                payload={
+                    "target_type": "donor_group_parameters",
+                    "target_id": parameters.pk,
+                    "donor_group_id": donor_group.pk,
+                    "event": event,
+                },
+                send_push=True,
+            )
 
 
 class ItemCategoryViewSet(viewsets.ReadOnlyModelViewSet):
@@ -187,10 +249,10 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
             "collection__created_by_member__user",
             "created_by_member",
             "created_by_member__user",
-            "meeting",
-            "meeting__geodata",
-            "meeting__finalized_by_member",
-            "meeting__finalized_by_member__user",
+            "parameters",
+            "parameters__geodata",
+            "parameters__finalized_by_member",
+            "parameters__finalized_by_member__user",
         ).prefetch_related(
             "members",
             "members__user",
@@ -215,21 +277,25 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="schedule-meeting")
     def schedule_meeting(self, request, pk=None):
+        return self.set_parameters(request, pk=pk)
+
+    @action(detail=True, methods=["post"], url_path="set-parameters")
+    def set_parameters(self, request, pk=None):
         donor_group = self.get_object()
         if not is_donor_group_collection_author_or_manager(
             donor_group=donor_group,
             user=request.user,
         ):
             return Response(
-                {"detail": "Only the collection author or an organization manager can schedule a donor group meeting."},
+                {"detail": "Only the collection author or an organization manager can set donor group parameters."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        meeting = getattr(donor_group, "meeting", None)
-        serializer = DonorGroupMeetingSerializer(
-            instance=meeting,
+        parameters = getattr(donor_group, "parameters", None)
+        serializer = DonorGroupParametersSerializer(
+            instance=parameters,
             data=request.data,
-            partial=meeting is not None,
+            partial=parameters is not None,
             context=self.get_serializer_context(),
         )
         serializer.is_valid(raise_exception=True)
@@ -238,14 +304,15 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
             user=request.user,
             is_active=True,
         )
-        meeting = serializer.save(
+        parameters = serializer.save(
             donor_group=donor_group,
             finalized_by_member=finalized_by_member,
             finalized_at=timezone.now(),
         )
-        self._notify_meeting_scheduled(
+        notify_donor_group_parameters_update(
+            request=request,
             donor_group=donor_group,
-            meeting=meeting,
+            parameters=parameters,
             notify_place=any(
                 field in serializer.validated_data
                 for field in ("geodata", "street", "description")
@@ -256,25 +323,29 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
                 or "ends_at" in serializer.validated_data
             ),
         )
-        return Response(DonorGroupMeetingSerializer(meeting).data, status=status.HTTP_200_OK)
+        return Response(DonorGroupParametersSerializer(parameters).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="schedule-meeting-time")
     def schedule_meeting_time(self, request, pk=None):
+        return self.set_parameters_time(request, pk=pk)
+
+    @action(detail=True, methods=["post"], url_path="set-parameters-time")
+    def set_parameters_time(self, request, pk=None):
         donor_group = self.get_object()
         if not is_donor_group_collection_author_or_manager(
             donor_group=donor_group,
             user=request.user,
         ):
             return Response(
-                {"detail": "Only the collection author or an organization manager can schedule a donor group meeting time."},
+                {"detail": "Only the collection author or an organization manager can set donor group parameters time."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        meeting = getattr(donor_group, "meeting", None)
-        serializer = DonorGroupMeetingTimeSerializer(
-            instance=meeting,
+        parameters = getattr(donor_group, "parameters", None)
+        serializer = DonorGroupParametersTimeSerializer(
+            instance=parameters,
             data=request.data,
-            partial=meeting is not None,
+            partial=parameters is not None,
             context=self.get_serializer_context(),
         )
         serializer.is_valid(raise_exception=True)
@@ -283,81 +354,22 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
             user=request.user,
             is_active=True,
         )
-        meeting = serializer.save(
+        parameters = serializer.save(
             donor_group=donor_group,
             finalized_by_member=finalized_by_member,
             finalized_at=timezone.now(),
         )
-        self._notify_meeting_scheduled(
+        notify_donor_group_parameters_update(
+            request=request,
             donor_group=donor_group,
-            meeting=meeting,
+            parameters=parameters,
             notify_date="starts_at" in serializer.validated_data,
             notify_time=(
                 "starts_at" in serializer.validated_data
                 or "ends_at" in serializer.validated_data
             ),
         )
-        return Response(DonorGroupMeetingSerializer(meeting).data, status=status.HTTP_200_OK)
-
-    def _notify_meeting_scheduled(
-        self,
-        *,
-        donor_group,
-        meeting,
-        notify_place=False,
-        notify_date=False,
-        notify_time=False,
-    ):
-        notifications = []
-        starts_at = timezone.localtime(meeting.starts_at)
-        if notify_date:
-            notifications.append(
-                (
-                    "Назначена дата встречи донорской группы",
-                    starts_at.strftime("%d.%m.%Y"),
-                    "date_assigned",
-                )
-            )
-        if notify_time:
-            body = starts_at.strftime("%H:%M")
-            if meeting.ends_at:
-                body = f"{body}-{timezone.localtime(meeting.ends_at).strftime('%H:%M')}"
-            notifications.append(
-                (
-                    "Назначено время встречи донорской группы",
-                    body,
-                    "time_assigned",
-                )
-            )
-        if notify_place:
-            notifications.append(
-                (
-                    "Назначено место встречи донорской группы",
-                    meeting.description or meeting.street or str(meeting.geodata),
-                    "place_assigned",
-                )
-            )
-        if not notifications:
-            return
-
-        for member in donor_group.members.select_related("user"):
-            if member.user_id == meeting.finalized_by_member.user_id:
-                continue
-            for title, body, event in notifications:
-                create_notification(
-                    recipient=member.user,
-                    actor=self.request.user,
-                    type="system",
-                    title=title,
-                    body=body,
-                    payload={
-                        "target_type": "donor_group_meeting",
-                        "target_id": meeting.pk,
-                        "donor_group_id": donor_group.pk,
-                        "event": event,
-                    },
-                    send_push=True,
-                )
+        return Response(DonorGroupParametersSerializer(parameters).data, status=status.HTTP_200_OK)
 
 
 class DonorGroupMemberViewSet(viewsets.ModelViewSet):
@@ -406,6 +418,62 @@ class DonorGroupItemViewSet(viewsets.ModelViewSet):
         if user_item_id:
             queryset = queryset.filter(user_item_id=user_item_id)
         return queryset
+
+
+class DonorGroupVideoReportViewSet(viewsets.ModelViewSet):
+    serializer_class = DonorGroupVideoReportSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = DonorGroupVideoReport.objects.select_related(
+            "donor_group",
+            "donor_group__collection",
+            "donor_group__collection__organization",
+            "donor_group__collection__created_by_member",
+            "donor_group__collection__created_by_member__user",
+            "uploaded_by",
+        )
+        if not user or not user.is_authenticated:
+            return queryset.none()
+        queryset = queryset.filter(
+            Q(donor_group__members__user=user)
+            | Q(donor_group__collection__created_by_member__user=user)
+            | Q(
+                donor_group__collection__organization__members__user=user,
+                donor_group__collection__organization__members__role=OrganizationMember.Role.MANAGER,
+                donor_group__collection__organization__members__is_active=True,
+            )
+        ).distinct()
+        donor_group_id = self.request.query_params.get("donor_group")
+        if donor_group_id:
+            queryset = queryset.filter(donor_group_id=donor_group_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(uploaded_by=self.request.user)
+
+    def perform_update(self, serializer):
+        report = self.get_object()
+        if report.uploaded_by_id != self.request.user.id and not is_donor_group_collection_author_or_manager(
+            donor_group=report.donor_group,
+            user=self.request.user,
+        ):
+            raise PermissionDenied(
+                "Only the uploader or group manager can edit this video report."
+            )
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.uploaded_by_id != self.request.user.id and not is_donor_group_collection_author_or_manager(
+            donor_group=instance.donor_group,
+            user=self.request.user,
+        ):
+            raise PermissionDenied(
+                "Only the uploader or group manager can delete this video report."
+            )
+        instance.delete()
 
 
 class CourierProfileViewSet(viewsets.ModelViewSet):
@@ -547,6 +615,69 @@ class PollViewSet(viewsets.ModelViewSet):
         self._notify_donor_group_members(new_poll)
         response_serializer = self.get_serializer(new_poll)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def finalize(self, request, pk=None):
+        poll = self.get_object()
+        serializer = PollFinalizeSerializer(
+            data=request.data,
+            context={**self.get_serializer_context(), "poll": poll},
+        )
+        serializer.is_valid(raise_exception=True)
+        option = serializer.validated_data["option"]
+        finalized_by_member = self._get_created_by_member(
+            {"donor_group": poll.donor_group, "news": poll.news}
+        )
+
+        with transaction.atomic():
+            parameters, _created = DonorGroupParameters.objects.get_or_create(
+                donor_group=poll.donor_group,
+                defaults={
+                    "finalized_by_member": finalized_by_member,
+                    "finalized_at": timezone.now(),
+                },
+            )
+            notify_place = False
+            notify_date = False
+            notify_time = False
+            if poll.kind == Poll.Kind.DATE:
+                parameters.starts_at = option.starts_at
+                parameters.ends_at = option.ends_at
+                notify_date = True
+                notify_time = True
+            if poll.kind == Poll.Kind.PLACE:
+                parameters.geodata = option.geodata
+                parameters.street = option.place_street
+                parameters.description = option.place_description
+                notify_place = True
+            parameters.finalized_by_member = finalized_by_member
+            parameters.finalized_at = timezone.now()
+            parameters.full_clean()
+            parameters.save()
+
+            poll.finalized_option = option
+            poll.finalized_by_member = finalized_by_member
+            poll.finalized_at = timezone.now()
+            poll.status = Poll.Status.CLOSED
+            poll.save(
+                update_fields=(
+                    "finalized_option",
+                    "finalized_by_member",
+                    "finalized_at",
+                    "status",
+                    "updated_at",
+                )
+            )
+
+        notify_donor_group_parameters_update(
+            request=request,
+            donor_group=poll.donor_group,
+            parameters=parameters,
+            notify_place=notify_place,
+            notify_date=notify_date,
+            notify_time=notify_time,
+        )
+        return Response(self.get_serializer(poll).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"], url_path="from-place-proposals")
     def from_place_proposals(self, request):

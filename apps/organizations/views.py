@@ -15,6 +15,7 @@ from .models import (
     OrganizationNews,
     OrganizationNewsComment,
     OrganizationNewsImage,
+    OrganizationReportDocument,
     OrganizationRegistrationRequest,
 )
 from .permissions import (
@@ -38,6 +39,7 @@ from .serializers import (
     OrganizationNewsCommentSerializer,
     OrganizationNewsImageSerializer,
     OrganizationNewsSerializer,
+    OrganizationReportDocumentSerializer,
     OrganizationMemberSerializer,
     OrganizationRegistrationDecisionSerializer,
     OrganizationRegistrationRequestCreateSerializer,
@@ -261,6 +263,23 @@ class OrganizationNewsCommentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+
+class OrganizationReportDocumentViewSet(OrganizationContentViewSetMixin, viewsets.ModelViewSet):
+    serializer_class = OrganizationReportDocumentSerializer
+    permission_classes = [IsReadOnlyOrOrganizationContentAuthorOrManager]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = OrganizationReportDocument.objects.select_related(
+            "organization",
+            "created_by_member",
+            "created_by_member__user",
+        )
+        organization_id = self.request.query_params.get("organization")
+        if organization_id:
+            queryset = queryset.filter(organization_id=organization_id)
+        return queryset
 
 
 class OrganizationRegistrationRequestViewSet(viewsets.ModelViewSet):

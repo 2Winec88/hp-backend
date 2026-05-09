@@ -11,8 +11,10 @@ from .models import (
     OrganizationNews,
     OrganizationNewsComment,
     OrganizationNewsImage,
+    OrganizationReportDocument,
     OrganizationRegistrationRequest,
 )
+from .permissions import is_active_organization_manager
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -336,6 +338,46 @@ class OrganizationNewsCommentSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if self.instance and "news" in attrs and attrs["news"] != self.instance.news:
             raise serializers.ValidationError({"news": "News cannot be changed."})
+        return attrs
+
+
+class OrganizationReportDocumentSerializer(serializers.ModelSerializer):
+    created_by_member = serializers.PrimaryKeyRelatedField(read_only=True)
+    organization_name = serializers.CharField(source="organization.official_name", read_only=True)
+
+    class Meta:
+        model = OrganizationReportDocument
+        fields = (
+            "id",
+            "organization",
+            "organization_name",
+            "created_by_member",
+            "title",
+            "description",
+            "document",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "organization_name",
+            "created_by_member",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_organization(self, organization):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not is_active_organization_manager(organization=organization, user=user):
+            raise serializers.ValidationError(
+                "Only an active organization manager can publish report documents."
+            )
+        return organization
+
+    def validate(self, attrs):
+        if self.instance and "organization" in attrs and attrs["organization"] != self.instance.organization:
+            raise serializers.ValidationError({"organization": "Organization cannot be changed."})
         return attrs
 
 

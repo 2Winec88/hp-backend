@@ -145,6 +145,18 @@ Current geodata note, 2026-05-08:
 
 В dev/test базу через migration загружен небольшой тестовый набор городов из разных частей России: Kaliningrad, Murmansk, Saint Petersburg, Moscow, Sochi, Yekaterinburg, Novosibirsk, Yakutsk, Vladivostok, Petropavlovsk-Kamchatsky.
 
+## File Upload Policy
+
+File validation is centralized in `apps.common.file_validators`.
+
+Current limits:
+
+- Images and user avatars: `jpg`, `jpeg`, `png`, `webp`, `gif`; MIME `image/jpeg`, `image/png`, `image/webp`, `image/gif`; max `5 MB`.
+- PDF documents for organization registration and organization activity reports: `pdf`; MIME `application/pdf`; max `25 MB`; PDF signature is checked.
+- Donor group video reports: `mp4`, `mov`, `webm`; MIME `video/mp4`, `video/quicktime`, `video/webm`; max `500 MB`.
+
+These rules are model-level validators and are also surfaced through DRF serializers as `400` responses on the corresponding file field.
+
 ### `apps.organizations`
 
 Отвечает за:
@@ -169,6 +181,7 @@ Current geodata note, 2026-05-08:
 - `OrganizationNews`
 - `OrganizationNewsImage`
 - `OrganizationNewsComment`
+- `OrganizationReportDocument`
 - `OrganizationRegistrationRequest`
 
 `Organization`:
@@ -224,6 +237,14 @@ Current geodata note, 2026-05-08:
 - может быть создан авторизованным пользователем;
 - автор или менеджер организации может редактировать/удалять.
 
+`OrganizationReportDocument`:
+
+- public PDF report for general organization activity;
+- belongs to `Organization`, not to `Collection` or `DonorGroup`;
+- has `created_by_member`;
+- stores `title`, `description`, and `document`;
+- creation requires an active organization manager; update/delete uses the common organization content author-or-manager permission.
+
 Ключевые endpoints:
 
 - `GET/DELETE /api/v1/organizations/members/`
@@ -233,6 +254,7 @@ Current geodata note, 2026-05-08:
 - `GET/POST/PATCH/DELETE /api/v1/organizations/news/`
 - `GET/POST/PATCH/DELETE /api/v1/organizations/news-images/`
 - `GET/POST/PATCH/DELETE /api/v1/organizations/news-comments/`
+- `GET/POST/PATCH/DELETE /api/v1/organizations/report-documents/`
 - `GET/POST /api/v1/organizations/organization-registration-requests/`
 - `POST /api/v1/organizations/organization-registration-requests/{id}/approve/`
 - `POST /api/v1/organizations/organization-registration-requests/{id}/reject/`
@@ -344,7 +366,7 @@ WebSocket:
 
 ### `apps.collections`
 
-Реализует публичный REST API для сборов гуманитарной помощи, вещей пользователей, донорских групп, голосований и встреч. Endpoint курьерских профилей пока остаётся здесь для обратной совместимости, но модель `CourierProfile` принадлежит `apps.accounts`. Платформа не ведёт полный складской цикл учёта вещей; `UserItem` нужен как подсказка организатору, у кого что потенциально есть. Выбор финального результата голосования и видеоотчёты пока остаются будущей работой.
+Реализует публичный REST API для сборов гуманитарной помощи, вещей пользователей, донорских групп, голосований, встреч и видеоотчётов. Endpoint курьерских профилей пока остаётся здесь для обратной совместимости, но модель `CourierProfile` принадлежит `apps.accounts`. Платформа не ведёт полный складской цикл учёта вещей; `UserItem` нужен как подсказка организатору, у кого что потенциально есть. Финальный выбор даты/места по голосованию реализован как явное действие организатора.
 
 Ключевые модели:
 
@@ -355,9 +377,10 @@ WebSocket:
 - `CollectionItem`
 - `BranchItem`
 - `DonorGroup`
-- `DonorGroupMeeting`
+- `DonorGroupParameters`
 - `DonorGroupMember`
 - `DonorGroupItem`
+- `DonorGroupVideoReport`
 - `MeetingPlaceProposal`
 - `Poll`
 - `PollOption`
@@ -369,9 +392,17 @@ WebSocket:
 
 Донорские группы привязаны к `Collection`. `DonorGroupMember` связывает пользователей с группой, `DonorGroupItem` хранит выбранный организатором `UserItem` и количество вещей пользователя для этой группы. Приглашения в донорскую группу идут через общий механизм `communications.Invitation` с `target_type="donor_group"` и при accept создают membership.
 
-`DonorGroupMeeting` хранит вручную назначенное время и, опционально, место встречи группы. Время можно назначить отдельно через `POST /api/v1/collections/donor-groups/{id}/schedule-meeting-time/`; место и время вместе можно назначить через `POST /api/v1/collections/donor-groups/{id}/schedule-meeting/`. Эти действия не привязаны к итогам голосований.
+`DonorGroupParameters` хранит вручную назначенные параметры донорской группы: дату/время и, опционально, место сбора. Время можно назначить отдельно через `POST /api/v1/collections/donor-groups/{id}/set-parameters-time/`; место и время вместе можно назначить через `POST /api/v1/collections/donor-groups/{id}/set-parameters/`. Старые `schedule-meeting*` URLs остаются alias-ручками для совместимости. Эти действия не привязаны к итогам голосований.
 
-Назначение даты, времени и места создаёт существующие `communications.Notification` для участников donor group, кроме пользователя, который выполнил действие. В `payload` используется `target_type="donor_group_meeting"` и `event`: `date_assigned`, `time_assigned`, `place_assigned`.
+Фронтовые агрегаты реализованы без отдельного полного цикла передачи вещей:
+
+- `Collection` отдаёт `quantity_required_total`, `quantity_selected_total`, `donor_groups_count`, `donor_group_members_count`, `donor_group_items_count`;
+- `CollectionItem` отдаёт `selected_quantity` и `remaining_quantity` по категории внутри сбора;
+- `UserItem` отдаёт `selected_quantity` и `available_quantity`; query param `collection` ограничивает расчёт выбранными вещами в донорских группах конкретного сбора.
+
+`DonorGroupVideoReport` хранит видеоотчёт, загруженный участником donor group, и привязан напрямую к `DonorGroup` без дополнительной группировки. Читать отчёты могут участники группы, автор сбора и менеджеры организации; загружать могут участники группы.
+
+Назначение даты, времени и места создаёт существующие `communications.Notification` для участников donor group, кроме пользователя, который выполнил действие. В `payload` используется `target_type="donor_group_parameters"` и `event`: `date_assigned`, `time_assigned`, `place_assigned`.
 
 Голосования поддерживают:
 
@@ -381,13 +412,10 @@ WebSocket:
 - один голос пользователя на один poll;
 - place polls из предложений места встречи;
 - repost poll без вариантов с нулём голосов;
+- финализацию `date`/`place` poll option через `POST /api/v1/collections/polls/{id}/finalize/`;
 - push/in-app уведомления участникам donor group при создании открытого donor group poll.
 
-Будущая часть `collections` должна покрыть:
-
-- финальный выбор результата голосования как бизнес-действие;
-- улучшение координации donor group без автоматического matching и складского учёта;
-- видеоотчёты.
+Дальнейшая часть `collections` должна покрыть улучшение координации donor group без автоматического matching и складского учёта, а также возможные вложения/метаданные к отчётам, если они понадобятся.
 
 Ожидаемый доменный сценарий:
 
@@ -451,7 +479,7 @@ WebSocket:
 - `Event.geodata`
 - `OrganizationBranch.geodata`
 - `Collection.geodata`
-- `DonorGroupMeeting.geodata`
+- `DonorGroupParameters.geodata`
 - `MeetingPlaceProposal.geodata`
 - `PollOption.geodata`
 
@@ -584,7 +612,7 @@ uv run python manage.py makemigrations --check --dry-run
 - communications notifications/invitations;
 - communications devices/push delivery audit;
 - organization and donor group chat messages;
-- collections CRUD, donor groups, meetings, proposals and polls;
+- collections CRUD, donor groups, parameters, proposals, polls, aggregate fields, and video reports;
 - websocket health endpoint.
 
 ## 11. Документация в `docs`
@@ -614,28 +642,28 @@ uv run python manage.py makemigrations --check --dry-run
 Current implementation note, 2026-05-09:
 
 - Organization branches are implemented.
-- Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items. Courier profile API remains exposed under collections for compatibility, while the model belongs to accounts.
+- Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items, frontend aggregate fields, and donor group video reports. Courier profile API remains exposed under collections for compatibility, while the model belongs to accounts.
 - Donor group invitations are implemented through `communications.Invitation` with `target_type="donor_group"`.
-- Donor group meeting scheduling is implemented: collection authors and organization managers manually set a donor group's meeting time through `schedule-meeting-time`, or meeting place and time through `schedule-meeting`; this is intentionally not tied to poll results.
+- Donor group parameters scheduling is implemented: collection authors and organization managers manually set a donor group's date/time through `set-parameters-time`, or place and date/time through `set-parameters`; legacy `schedule-meeting*` aliases remain for compatibility.
 - Push delivery is implemented as an additional `Notification` delivery channel.
-- Voting base is implemented: text/date/place polls, poll options, one vote per user per poll, meeting place proposals, place-poll creation from proposals, poll reposting without zero-vote options, and push notifications for new open donor group polls.
-- Remaining major collection work: final poll-result selection and video reports.
+- Voting base is implemented: text/date/place polls, poll options, one vote per user per poll, meeting place proposals, place-poll creation from proposals, poll reposting without zero-vote options, explicit finalization of date/place poll options into `DonorGroupParameters`, and push notifications for new open donor group polls.
+- Organization PDF report documents are implemented under `/api/v1/organizations/report-documents/`.
 
 Приоритетные направления:
 
-1. Video reports.
-   - Загрузка видеоотчётов по сбору или донорской группе.
-   - Доступ участникам соответствующего сбора/группы и менеджерам организации.
-   - Не связывать отчёты с полным учётом конкретных вещей.
+1. Report improvements.
+   - Optional metadata, moderation status, thumbnails, or file-size limits for donor group video reports.
+   - Optional organization report categories if PDF reports grow beyond a flat list.
+   - Keep video reports tied to donor groups and PDF reports tied to organizations, not to collection-level item accounting.
 
 2. Chat improvements.
    - Read state / last read marker.
    - Attachments.
    - Optional push notification rules for mentions or important messages.
 
-3. Poll finalization.
-   - Явный выбор финального результата голосования как отдельное бизнес-действие.
-   - Не смешивать ручное `schedule-meeting` с автоматическим применением poll result.
+3. Meeting/poll UX improvements.
+   - Better frontend flows around already implemented `poll.finalize`.
+   - Keep manual `set-parameters` available as a separate organizer action.
 
 4. Location import maintenance.
    - Русскоязычный JSON import: `uv run python manage.py import_russia_locations`.

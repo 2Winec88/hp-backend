@@ -12,6 +12,7 @@ from .views import (
     OrganizationNewsCommentViewSet,
     OrganizationNewsImageViewSet,
     OrganizationNewsViewSet,
+    OrganizationReportDocumentViewSet,
     OrganizationRegistrationRequestViewSet,
 )
 
@@ -27,6 +28,7 @@ router.register("event-images", EventImageViewSet, basename="event-image")
 router.register("news", OrganizationNewsViewSet, basename="organization-news")
 router.register("news-images", OrganizationNewsImageViewSet, basename="organization-news-image")
 router.register("news-comments", OrganizationNewsCommentViewSet, basename="organization-news-comment")
+router.register("report-documents", OrganizationReportDocumentViewSet, basename="organization-report-document")
 router.register("event-news", EventNewsViewSet, basename="event-news")
 router.register(
     "organization-registration-requests",
