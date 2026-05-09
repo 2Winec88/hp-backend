@@ -4,7 +4,6 @@ from .models import (
     BranchItem,
     Collection,
     CollectionItem,
-    CourierProfile,
     DonorGroup,
     DonorGroupItem,
     DonorGroupMeeting,
@@ -111,13 +110,6 @@ class DonorGroupMeetingAdmin(admin.ModelAdmin):
     list_display = ("donor_group", "starts_at", "street", "finalized_by_member", "finalized_at")
     search_fields = ("donor_group__title", "street", "description")
     autocomplete_fields = ("donor_group", "geodata", "finalized_by_member")
-
-
-@admin.register(CourierProfile)
-class CourierProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "car_name", "created_at")
-    search_fields = ("user__email", "car_name")
-    autocomplete_fields = ("user",)
 
 
 class PollOptionInline(admin.TabularInline):

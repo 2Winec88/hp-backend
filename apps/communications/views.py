@@ -1,17 +1,23 @@
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from .models import Invitation, Notification
-from .models import NotificationDelivery, UserDevice
+from .models import DonorGroupMessage, Invitation, Notification
+from .models import NotificationDelivery, OrganizationMessage, UserDevice
 from .serializers import (
+    DonorGroupMessageSerializer,
     InvitationCreateSerializer,
     InvitationSerializer,
     NotificationCreateSerializer,
     NotificationDeliverySerializer,
     NotificationSerializer,
+    OrganizationMessageSerializer,
     UserDeviceSerializer,
+    can_manage_donor_group_message,
+    can_manage_organization_message,
 )
 from .services import accept_invitation, cancel_invitation, decline_invitation
 
@@ -88,6 +94,102 @@ class NotificationDeliveryViewSet(viewsets.ReadOnlyModelViewSet):
         if channel:
             queryset = queryset.filter(channel=channel)
         return queryset
+
+
+class OrganizationMessageViewSet(viewsets.ModelViewSet):
+    serializer_class = OrganizationMessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = OrganizationMessage.objects.select_related(
+            "organization",
+            "author",
+        ).filter(
+            organization__members__user=self.request.user,
+            organization__members__is_active=True,
+        ).distinct()
+        organization_id = self.request.query_params.get("organization")
+        if organization_id:
+            queryset = queryset.filter(organization_id=organization_id)
+        after_id = self.request.query_params.get("after_id")
+        if after_id:
+            queryset = queryset.filter(id__gt=after_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
+
+    def perform_update(self, serializer):
+        if not can_manage_organization_message(
+            message=self.get_object(),
+            user=self.request.user,
+        ):
+            raise PermissionDenied("Only the message author or organization manager can edit this message.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not can_manage_organization_message(
+            message=instance,
+            user=self.request.user,
+        ):
+            raise PermissionDenied("Only the message author or organization manager can delete this message.")
+        instance.deleted_at = timezone.now()
+        instance.save(update_fields=("deleted_at", "updated_at"))
+
+
+class DonorGroupMessageViewSet(viewsets.ModelViewSet):
+    serializer_class = DonorGroupMessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = DonorGroupMessage.objects.select_related(
+            "donor_group",
+            "donor_group__collection",
+            "donor_group__collection__organization",
+            "donor_group__collection__created_by_member",
+            "donor_group__collection__created_by_member__user",
+            "author",
+        ).filter(
+            Q(donor_group__members__user=self.request.user)
+            | Q(
+                donor_group__collection__created_by_member__user=self.request.user,
+                donor_group__collection__created_by_member__is_active=True,
+            )
+            | Q(
+                donor_group__collection__organization__members__user=self.request.user,
+                donor_group__collection__organization__members__is_active=True,
+                donor_group__collection__organization__members__role="manager",
+            )
+        ).distinct()
+        donor_group_id = self.request.query_params.get("donor_group")
+        if donor_group_id:
+            queryset = queryset.filter(donor_group_id=donor_group_id)
+        after_id = self.request.query_params.get("after_id")
+        if after_id:
+            queryset = queryset.filter(id__gt=after_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(author=self.request.user)
+
+    def perform_update(self, serializer):
+        if not can_manage_donor_group_message(
+            message=self.get_object(),
+            user=self.request.user,
+        ):
+            raise PermissionDenied("Only the message author or donor group manager can edit this message.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if not can_manage_donor_group_message(
+            message=instance,
+            user=self.request.user,
+        ):
+            raise PermissionDenied("Only the message author or donor group manager can delete this message.")
+        instance.deleted_at = timezone.now()
+        instance.save(update_fields=("deleted_at", "updated_at"))
 
 
 class InvitationViewSet(viewsets.ModelViewSet):

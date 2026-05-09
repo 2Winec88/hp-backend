@@ -137,6 +137,54 @@ class NotificationDelivery(models.Model):
         return f"{self.notification_id} - {self.channel} - {self.status}"
 
 
+class OrganizationMessage(models.Model):
+    organization = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="organization_messages",
+    )
+    text = models.TextField()
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "organization_messages"
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"{self.organization_id} - {self.author_id}: {self.text[:30]}"
+
+
+class DonorGroupMessage(models.Model):
+    donor_group = models.ForeignKey(
+        "collections.DonorGroup",
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="donor_group_messages",
+    )
+    text = models.TextField()
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "donor_group_messages"
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"{self.donor_group_id} - {self.author_id}: {self.text[:30]}"
+
+
 class Invitation(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

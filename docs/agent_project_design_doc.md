@@ -59,6 +59,7 @@
 
 - `User`
 - `EmailVerificationCode`
+- `CourierProfile`
 
 `User`:
 
@@ -66,6 +67,14 @@
 - использует `email` как `USERNAME_FIELD`;
 - имеет `avatar`, `bio`, `is_email_verified`;
 - имеет nullable `geodata` на `common.GeoData`.
+
+`CourierProfile`:
+
+- профиль пользователя как курьера-добровольца;
+- находится в `apps.accounts`, потому что является расширением пользователя;
+- сейчас хранит `car_name`;
+- API для обратной совместимости остаётся в `/api/v1/collections/courier-profiles/`;
+- физическая таблица сохранена как `collections_courierprofile`, чтобы перенос модели не терял существующие данные.
 
 Ключевые endpoints:
 
@@ -276,6 +285,24 @@ Current geodata note, 2026-05-08:
 - статусы: `pending`, `sent`, `failed`, `skipped`;
 - для push может ссылаться на `UserDevice`.
 
+`OrganizationMessage`:
+
+- сообщение чата организации;
+- принадлежит `Organization`;
+- автором является пользователь;
+- доступ на чтение/запись основан на активном `OrganizationMember`;
+- автор может редактировать/удалять своё сообщение, менеджер организации может модерировать;
+- `DELETE` мягкий через `deleted_at`.
+
+`DonorGroupMessage`:
+
+- сообщение чата донорской группы;
+- принадлежит `collections.DonorGroup`;
+- автором является пользователь;
+- доступ на чтение/запись основан на `DonorGroupMember`;
+- автор может редактировать/удалять своё сообщение, автор сбора или менеджер организации может модерировать;
+- `DELETE` мягкий через `deleted_at`.
+
 `Invitation`:
 
 - универсальное приглашение;
@@ -293,6 +320,8 @@ Current geodata note, 2026-05-08:
 - `POST /api/v1/communications/notifications/mark-all-read/`
 - `GET/POST/PATCH/DELETE /api/v1/communications/devices/`
 - `GET /api/v1/communications/notification-deliveries/`
+- `GET/POST/PATCH/DELETE /api/v1/communications/organization-messages/`
+- `GET/POST/PATCH/DELETE /api/v1/communications/donor-group-messages/`
 - `GET/POST /api/v1/communications/invitations/`
 - `POST /api/v1/communications/invitations/{id}/accept/`
 - `POST /api/v1/communications/invitations/{id}/decline/`
@@ -315,7 +344,7 @@ WebSocket:
 
 ### `apps.collections`
 
-Реализует публичный REST API для сборов гуманитарной помощи, вещей пользователей, донорских групп, голосований, встреч и курьерских профилей. Transfer lifecycle, чаты, выбор финального результата голосования, назначение курьера и видеоотчёты пока остаются будущей работой.
+Реализует публичный REST API для сборов гуманитарной помощи, вещей пользователей, донорских групп, голосований и встреч. Endpoint курьерских профилей пока остаётся здесь для обратной совместимости, но модель `CourierProfile` принадлежит `apps.accounts`. Платформа не ведёт полный складской цикл учёта вещей; `UserItem` нужен как подсказка организатору, у кого что потенциально есть. Выбор финального результата голосования и видеоотчёты пока остаются будущей работой.
 
 Ключевые модели:
 
@@ -329,7 +358,6 @@ WebSocket:
 - `DonorGroupMeeting`
 - `DonorGroupMember`
 - `DonorGroupItem`
-- `CourierProfile`
 - `MeetingPlaceProposal`
 - `Poll`
 - `PollOption`
@@ -337,11 +365,13 @@ WebSocket:
 
 Текущее решение для MVP: `ItemCategory` используется как конкретный тип вещи/потребности, например "Зубная гигиена", "Питьевая вода", "Куртки". Поле `description` хранит примеры содержимого категории. Не дублировать это описание в будущих связующих моделях вроде `UserItem` и `CollectionItem`; там должны жить контекстные поля пользователя или сбора.
 
-Сейчас реализован слой сборов: пользовательские вещи, сборы организаций с `geodata`, позиции сборов, вещи, принимаемые филиалами, донорские группы, профили курьеров, предложения мест встречи и голосования. `CollectionUserItem` намеренно не добавлен: организатор пока вручную смотрит публичные `UserItem` и координирует передачу вне автоматического матчинга.
+Сейчас реализован слой сборов: пользовательские вещи, сборы организаций с `geodata`, позиции сборов, вещи, принимаемые филиалами, донорские группы, предложения мест встречи и голосования. `CollectionUserItem` намеренно не добавлен: организатор пока вручную смотрит публичные `UserItem` и координирует передачу вне автоматического матчинга.
 
 Донорские группы привязаны к `Collection`. `DonorGroupMember` связывает пользователей с группой, `DonorGroupItem` хранит выбранный организатором `UserItem` и количество вещей пользователя для этой группы. Приглашения в донорскую группу идут через общий механизм `communications.Invitation` с `target_type="donor_group"` и при accept создают membership.
 
-`DonorGroupMeeting` хранит вручную назначенное место и время встречи группы. Назначение встречи выполняется через `POST /api/v1/collections/donor-groups/{id}/schedule-meeting/` и не привязано к итогам голосований.
+`DonorGroupMeeting` хранит вручную назначенное время и, опционально, место встречи группы. Время можно назначить отдельно через `POST /api/v1/collections/donor-groups/{id}/schedule-meeting-time/`; место и время вместе можно назначить через `POST /api/v1/collections/donor-groups/{id}/schedule-meeting/`. Эти действия не привязаны к итогам голосований.
+
+Назначение даты, времени и места создаёт существующие `communications.Notification` для участников donor group, кроме пользователя, который выполнил действие. В `payload` используется `target_type="donor_group_meeting"` и `event`: `date_assigned`, `time_assigned`, `place_assigned`.
 
 Голосования поддерживают:
 
@@ -355,10 +385,8 @@ WebSocket:
 
 Будущая часть `collections` должна покрыть:
 
-- передачу вещей;
-- назначение и workflow курьера;
 - финальный выбор результата голосования как бизнес-действие;
-- чаты донорской группы;
+- улучшение координации donor group без автоматического matching и складского учёта;
 - видеоотчёты.
 
 Ожидаемый доменный сценарий:
@@ -429,8 +457,7 @@ WebSocket:
 
 Ожидаемое использование позже:
 
-- точки передачи вещей в transfer lifecycle;
-- адреса самостоятельной передачи через филиал, если появится отдельная модель передачи.
+- дополнительные точки координации, если появятся новые сущности встреч или отчётов.
 
 `is_online` остаётся на сущности мероприятия. Не выводить онлайн только по `geodata = null`: отсутствие геоданных может означать незаполненное место, черновик или офлайн без точного адреса.
 
@@ -489,14 +516,26 @@ transaction.on_commit(
 
 Channels подключён, но не должен быть фундаментом бизнес-логики.
 
-Использовать websocket для:
+Использовать websocket сейчас для:
 
-- live notifications;
 - чатов организации;
-- чатов донорской группы;
-- presence/typing позже, если потребуется.
+- чатов донорской группы.
+
+Не использовать websocket для in-app notification list на текущем этапе. Уведомления читаются через REST, обновляются через refetch/polling на frontend и при необходимости доставляются внешне через push.
+
+Optional realtime позже:
+
+- presence/typing;
+- live notification badge, если REST polling и push окажутся недостаточными.
 
 Не использовать websocket как единственный источник данных. Всё важное должно сохраняться в БД и читаться через REST.
+
+Текущие chat websocket endpoints:
+
+- `/ws/communications/organizations/{organization_id}/chat/`
+- `/ws/communications/donor-groups/{donor_group_id}/chat/`
+
+Они создают сообщения в БД и рассылают live event участникам соответствующего контекста. История и восстановление после reconnect идут через REST message endpoints.
 
 ## 9. Docker и инфраструктура
 
@@ -544,6 +583,7 @@ uv run python manage.py makemigrations --check --dry-run
 - organization news comments/views;
 - communications notifications/invitations;
 - communications devices/push delivery audit;
+- organization and donor group chat messages;
 - collections CRUD, donor groups, meetings, proposals and polls;
 - websocket health endpoint.
 
@@ -574,39 +614,30 @@ uv run python manage.py makemigrations --check --dry-run
 Current implementation note, 2026-05-09:
 
 - Organization branches are implemented.
-- Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items, courier profiles.
+- Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items. Courier profile API remains exposed under collections for compatibility, while the model belongs to accounts.
 - Donor group invitations are implemented through `communications.Invitation` with `target_type="donor_group"`.
-- Donor group meeting scheduling is implemented: collection authors and organization managers manually set a donor group's meeting place and date through `schedule-meeting`; this is intentionally not tied to poll results.
+- Donor group meeting scheduling is implemented: collection authors and organization managers manually set a donor group's meeting time through `schedule-meeting-time`, or meeting place and time through `schedule-meeting`; this is intentionally not tied to poll results.
 - Push delivery is implemented as an additional `Notification` delivery channel.
 - Voting base is implemented: text/date/place polls, poll options, one vote per user per poll, meeting place proposals, place-poll creation from proposals, poll reposting without zero-vote options, and push notifications for new open donor group polls.
-- Remaining major collection work: transfer lifecycle, chats, final poll-result selection, courier assignment workflow, video reports.
+- Remaining major collection work: final poll-result selection and video reports.
 
 Приоритетные направления:
 
-1. Transfer lifecycle.
-   - Передача вещей от donor group/пользователя к организации или через курьера.
-   - Статусы передачи и подтверждения сторон.
-   - Не делать автоматический matching; координация остаётся ручной.
+1. Video reports.
+   - Загрузка видеоотчётов по сбору или донорской группе.
+   - Доступ участникам соответствующего сбора/группы и менеджерам организации.
+   - Не связывать отчёты с полным учётом конкретных вещей.
 
-2. Courier assignment workflow.
-   - Назначение курьера-добровольца на передачу.
-   - Подтверждение принятия и доставки вещей.
+2. Chat improvements.
+   - Read state / last read marker.
+   - Attachments.
+   - Optional push notification rules for mentions or important messages.
 
-3. Video reports.
-   - Загрузка видеоотчётов после передачи.
-   - Доступ участникам соответствующего сбора/передачи и менеджерам организации.
-
-4. Чаты.
-   - Чат организации.
-   - Чат донорской группы.
-   - Доступ только участникам соответствующего контекста.
-   - REST history + websocket realtime.
-
-5. Poll finalization.
+3. Poll finalization.
    - Явный выбор финального результата голосования как отдельное бизнес-действие.
    - Не смешивать ручное `schedule-meeting` с автоматическим применением poll result.
 
-6. Location import maintenance.
+4. Location import maintenance.
    - Русскоязычный JSON import: `uv run python manage.py import_russia_locations`.
    - Загружать регионы в `common.Region`.
    - Загружать города в `common.City`.
@@ -619,6 +650,7 @@ Current implementation note, 2026-05-09:
 - Не смешивать отсутствие `geodata` с онлайн-форматом.
 - Не создавать отдельные city/address поля в новых доменах, если можно использовать `GeoData`.
 - Не отправлять email/внешние уведомления до commit транзакции.
-- Не делать websocket единственным способом получить уведомление или сообщение.
+- Не делать websocket единственным способом получить сообщение.
+- Не добавлять websocket-уведомления без явной продуктовой необходимости; для списка уведомлений достаточно REST/refetch/polling и push-доставки.
 - Не откатывать незнакомые изменения в рабочем дереве.
 - Перед изменениями в моделях всегда создавать миграции и проверять `makemigrations --check --dry-run`.

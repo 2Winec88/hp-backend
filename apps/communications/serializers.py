@@ -1,8 +1,22 @@
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
+from apps.collections.permissions import (
+    is_donor_group_collection_author_or_manager,
+    is_donor_group_member,
+)
+from apps.organizations.models import OrganizationMember
+from apps.organizations.permissions import is_active_organization_manager
+
 from .invitation_handlers import invitation_handlers
-from .models import Invitation, Notification, NotificationDelivery, UserDevice
+from .models import (
+    DonorGroupMessage,
+    Invitation,
+    Notification,
+    NotificationDelivery,
+    OrganizationMessage,
+    UserDevice,
+)
 from .services import create_invitation, create_notification
 
 
@@ -86,6 +100,92 @@ class NotificationDeliverySerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+
+class OrganizationMessageSerializer(serializers.ModelSerializer):
+    author_email = serializers.EmailField(source="author.email", read_only=True)
+    author_full_name = serializers.CharField(source="author.full_name", read_only=True)
+
+    class Meta:
+        model = OrganizationMessage
+        fields = (
+            "id",
+            "organization",
+            "author",
+            "author_email",
+            "author_full_name",
+            "text",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "author",
+            "author_email",
+            "author_full_name",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_organization(self, organization):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not _is_active_organization_member(organization=organization, user=user):
+            raise serializers.ValidationError("Only organization members can write to this chat.")
+        return organization
+
+    def validate(self, attrs):
+        if self.instance and "organization" in attrs and attrs["organization"] != self.instance.organization:
+            raise serializers.ValidationError({"organization": "Organization cannot be changed."})
+        text = attrs.get("text", getattr(self.instance, "text", ""))
+        if not text.strip():
+            raise serializers.ValidationError({"text": "Message text cannot be blank."})
+        return attrs
+
+
+class DonorGroupMessageSerializer(serializers.ModelSerializer):
+    author_email = serializers.EmailField(source="author.email", read_only=True)
+    author_full_name = serializers.CharField(source="author.full_name", read_only=True)
+
+    class Meta:
+        model = DonorGroupMessage
+        fields = (
+            "id",
+            "donor_group",
+            "author",
+            "author_email",
+            "author_full_name",
+            "text",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = (
+            "id",
+            "author",
+            "author_email",
+            "author_full_name",
+            "deleted_at",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate_donor_group(self, donor_group):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not is_donor_group_member(donor_group=donor_group, user=user):
+            raise serializers.ValidationError("Only donor group members can write to this chat.")
+        return donor_group
+
+    def validate(self, attrs):
+        if self.instance and "donor_group" in attrs and attrs["donor_group"] != self.instance.donor_group:
+            raise serializers.ValidationError({"donor_group": "Donor group cannot be changed."})
+        text = attrs.get("text", getattr(self.instance, "text", ""))
+        if not text.strip():
+            raise serializers.ValidationError({"text": "Message text cannot be blank."})
+        return attrs
 
 
 class NotificationCreateSerializer(serializers.Serializer):
@@ -182,3 +282,35 @@ class InvitationCreateSerializer(serializers.Serializer):
             send_push=validated_data["send_push"],
             expires_at=validated_data.get("expires_at"),
         )
+
+
+def _is_active_organization_member(*, organization, user):
+    if not user or not user.is_authenticated:
+        return False
+    return OrganizationMember.objects.filter(
+        organization=organization,
+        user=user,
+        is_active=True,
+    ).exists()
+
+
+def can_manage_organization_message(*, message, user):
+    if not user or not user.is_authenticated:
+        return False
+    if message.author_id == user.id:
+        return True
+    return is_active_organization_manager(
+        organization=message.organization,
+        user=user,
+    )
+
+
+def can_manage_donor_group_message(*, message, user):
+    if not user or not user.is_authenticated:
+        return False
+    if message.author_id == user.id:
+        return True
+    return is_donor_group_collection_author_or_manager(
+        donor_group=message.donor_group,
+        user=user,
+    )

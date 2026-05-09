@@ -34,6 +34,26 @@ class User(AbstractUser):
         return f"{self.first_name} {self.last_name}".strip()
 
 
+class CourierProfile(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="courier_profile",
+    )
+    car_name = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "collections_courierprofile"
+        verbose_name = "Courier profile"
+        verbose_name_plural = "Courier profiles"
+        ordering = ("user__email", "id")
+
+    def __str__(self):
+        return f"{self.user} - {self.car_name}"
+
+
 class EmailVerificationCode(models.Model):
     user = models.ForeignKey(
         User,

@@ -287,8 +287,6 @@ class DonorGroupMeeting(models.Model):
         super().clean()
         if self.ends_at and self.ends_at < self.starts_at:
             raise ValidationError({"ends_at": "End date cannot be earlier than start date."})
-        if not (self.geodata_id or self.street or self.description):
-            raise ValidationError({"geodata": "Meeting requires place data."})
 
 
 class DonorGroupMember(models.Model):
@@ -359,25 +357,6 @@ class DonorGroupItem(models.Model):
             raise ValidationError(
                 {"user_item": "The user item owner must be a donor group member."}
             )
-
-
-class CourierProfile(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="courier_profile",
-    )
-    car_name = models.CharField(max_length=120)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Courier profile"
-        verbose_name_plural = "Courier profiles"
-        ordering = ("user__email", "id")
-
-    def __str__(self):
-        return f"{self.user} - {self.car_name}"
 
 
 class Poll(models.Model):

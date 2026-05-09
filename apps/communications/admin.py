@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import Invitation, Notification, NotificationDelivery, UserDevice
+from .models import (
+    DonorGroupMessage,
+    Invitation,
+    Notification,
+    NotificationDelivery,
+    OrganizationMessage,
+    UserDevice,
+)
 
 
 @admin.register(Notification)
@@ -28,6 +35,24 @@ class NotificationDeliveryAdmin(admin.ModelAdmin):
     search_fields = ("notification__title", "notification__recipient__email", "error")
     autocomplete_fields = ("notification", "device")
     readonly_fields = ("created_at", "updated_at", "sent_at")
+
+
+@admin.register(OrganizationMessage)
+class OrganizationMessageAdmin(admin.ModelAdmin):
+    list_display = ("id", "organization", "author", "created_at", "deleted_at")
+    list_filter = ("created_at", "deleted_at")
+    search_fields = ("organization__official_name", "author__email", "text")
+    autocomplete_fields = ("organization", "author")
+    readonly_fields = ("created_at", "updated_at", "deleted_at")
+
+
+@admin.register(DonorGroupMessage)
+class DonorGroupMessageAdmin(admin.ModelAdmin):
+    list_display = ("id", "donor_group", "author", "created_at", "deleted_at")
+    list_filter = ("created_at", "deleted_at")
+    search_fields = ("donor_group__title", "author__email", "text")
+    autocomplete_fields = ("donor_group", "author")
+    readonly_fields = ("created_at", "updated_at", "deleted_at")
 
 
 @admin.register(Invitation)

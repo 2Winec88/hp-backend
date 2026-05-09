@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.accounts.models import CourierProfile
 from apps.organizations.models import (
     Organization,
     OrganizationBranch,
@@ -19,7 +20,6 @@ from .models import (
     BranchItem,
     Collection,
     CollectionItem,
-    CourierProfile,
     DonorGroup,
     DonorGroupItem,
     DonorGroupMeeting,
@@ -460,6 +460,17 @@ class CollectionPermissionTests(TestCase):
         self.assertEqual(meeting.geodata, geodata)
         self.assertEqual(meeting.street, "Lenina, 1")
         self.assertEqual(meeting.finalized_by_member, self.member_membership)
+        notification_events = set(
+            Notification.objects.filter(
+                recipient=self.donor,
+                payload__target_type="donor_group_meeting",
+                payload__target_id=meeting.id,
+            ).values_list("payload__event", flat=True)
+        )
+        self.assertEqual(
+            notification_events,
+            {"date_assigned", "time_assigned", "place_assigned"},
+        )
         self.assertTrue(
             Notification.objects.filter(
                 recipient=self.donor,
@@ -500,6 +511,104 @@ class CollectionPermissionTests(TestCase):
         meeting.refresh_from_db()
         self.assertEqual(meeting.street, "New place")
         self.assertEqual(meeting.finalized_by_member, self.manager_membership)
+
+    def test_collection_author_can_schedule_donor_group_meeting_time_without_place(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+        starts_at = timezone.now() + timedelta(days=2)
+        ends_at = starts_at + timedelta(hours=1)
+
+        self.client.force_authenticate(user=self.member)
+        response = self.client.post(
+            reverse("donor-group-schedule-meeting-time", args=(donor_group.id,)),
+            {
+                "starts_at": starts_at.isoformat(),
+                "ends_at": ends_at.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        meeting = DonorGroupMeeting.objects.get(donor_group=donor_group)
+        self.assertEqual(meeting.finalized_by_member, self.member_membership)
+        self.assertEqual(meeting.street, "")
+        self.assertIsNone(meeting.geodata)
+        notification_events = set(
+            Notification.objects.filter(
+                recipient=self.donor,
+                payload__target_type="donor_group_meeting",
+                payload__target_id=meeting.id,
+            ).values_list("payload__event", flat=True)
+        )
+        self.assertEqual(notification_events, {"date_assigned", "time_assigned"})
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.donor,
+                payload__target_type="donor_group_meeting",
+                payload__target_id=meeting.id,
+            ).exists()
+        )
+
+    def test_manager_can_update_donor_group_meeting_time_without_changing_place(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        starts_at = timezone.now() + timedelta(days=2)
+        meeting = DonorGroupMeeting.objects.create(
+            donor_group=donor_group,
+            street="Old place",
+            starts_at=starts_at,
+            finalized_by_member=self.member_membership,
+        )
+        new_starts_at = starts_at + timedelta(days=1)
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(
+            reverse("donor-group-schedule-meeting-time", args=(donor_group.id,)),
+            {
+                "starts_at": new_starts_at.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        meeting.refresh_from_db()
+        self.assertEqual(meeting.street, "Old place")
+        self.assertEqual(meeting.starts_at, new_starts_at)
+        self.assertEqual(meeting.finalized_by_member, self.manager_membership)
+
+    def test_non_manager_cannot_schedule_donor_group_meeting_time(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+
+        self.client.force_authenticate(user=self.donor)
+        response = self.client.post(
+            reverse("donor-group-schedule-meeting-time", args=(donor_group.id,)),
+            {
+                "starts_at": (timezone.now() + timedelta(days=1)).isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_non_manager_cannot_schedule_donor_group_meeting(self):
         collection = Collection.objects.create(

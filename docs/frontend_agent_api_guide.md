@@ -623,6 +623,48 @@ GET /api/v1/communications/notification-deliveries/?channel=push
 
 Read-only аудит email/push-доставки. Пользователь видит доставки только своих уведомлений.
 
+### Organization Messages
+
+```http
+GET    /api/v1/communications/organization-messages/?organization=1
+GET    /api/v1/communications/organization-messages/?organization=1&after_id=123
+POST   /api/v1/communications/organization-messages/
+PATCH  /api/v1/communications/organization-messages/{id}/
+DELETE /api/v1/communications/organization-messages/{id}/
+```
+
+История и REST fallback для чата организации. Читать и писать могут только активные `OrganizationMember`. Автор может редактировать/удалять своё сообщение, менеджер организации может модерировать. `DELETE` мягкий: заполняет `deleted_at`.
+
+Payload:
+
+```json
+{
+  "organization": 1,
+  "text": "Кто сегодня на точке?"
+}
+```
+
+### Donor Group Messages
+
+```http
+GET    /api/v1/communications/donor-group-messages/?donor_group=1
+GET    /api/v1/communications/donor-group-messages/?donor_group=1&after_id=123
+POST   /api/v1/communications/donor-group-messages/
+PATCH  /api/v1/communications/donor-group-messages/{id}/
+DELETE /api/v1/communications/donor-group-messages/{id}/
+```
+
+История и REST fallback для чата донорской группы. Читать и писать могут `DonorGroupMember`. Автор может редактировать/удалять своё сообщение; автор сбора или активный менеджер организации может модерировать. `DELETE` мягкий: заполняет `deleted_at`.
+
+Payload:
+
+```json
+{
+  "donor_group": 1,
+  "text": "Я могу привезти вещи после 18:00"
+}
+```
+
 ### Invitations
 
 ```http
@@ -660,6 +702,10 @@ Channels подключен. Сейчас frontend-facing WebSocket endpoint:
 ```text
 ws://<host>/ws/communications/health/
 wss://<host>/ws/communications/health/
+ws://<host>/ws/communications/organizations/{organization_id}/chat/
+wss://<host>/ws/communications/organizations/{organization_id}/chat/
+ws://<host>/ws/communications/donor-groups/{donor_group_id}/chat/
+wss://<host>/ws/communications/donor-groups/{donor_group_id}/chat/
 ```
 
 JWT middleware принимает token из query param:
@@ -674,7 +720,35 @@ JWT middleware принимает token из query param:
 Authorization: Bearer <access_token>
 ```
 
-Текущий endpoint служит health-check. Полноценные чаты и live notifications будут добавляться отдельно. REST и база остаются источником истины; WebSocket не должен быть единственным способом получить важные данные.
+`health` endpoint служит health-check. Chat endpoints принимают JSON:
+
+```json
+{
+  "type": "message.create",
+  "text": "Message text"
+}
+```
+
+В ответ всем подключённым участникам соответствующего чата отправляется:
+
+```json
+{
+  "type": "message.created",
+  "message": {
+    "id": 1,
+    "donor_group": 1,
+    "author": 2,
+    "author_email": "user@example.com",
+    "author_full_name": "User Name",
+    "text": "Message text",
+    "deleted_at": null,
+    "created_at": "...",
+    "updated_at": "..."
+  }
+}
+```
+
+REST и база остаются источником истины; WebSocket не должен быть единственным способом получить историю или пропущенные сообщения.
 
 ## Collections
 
@@ -688,7 +762,8 @@ Authorization: Bearer <access_token>
 - Collection author or active organization manager manages collections, collection items, donor groups, donor group members, and donor group items.
 - Active organization manager manages branch items.
 - Donor group invitations use `/api/v1/communications/invitations/` with `target_type="donor_group"`.
-- Collection authors and organization managers manually schedule donor group meetings with `POST /api/v1/collections/donor-groups/{id}/schedule-meeting/`. This sets the meeting place and date directly and is not tied to poll results.
+- Collection authors and organization managers manually schedule donor group meeting time with `POST /api/v1/collections/donor-groups/{id}/schedule-meeting-time/`.
+- Collection authors and organization managers can also schedule meeting place and time together with `POST /api/v1/collections/donor-groups/{id}/schedule-meeting/`. This is not tied to poll results.
 - Poll endpoints are available under `/api/v1/collections/polls/`, `/poll-options/`, `/poll-votes/`, and `/meeting-place-proposals/`.
 - Poll kinds are `text`, `date`, and `place`; poll statuses are `draft`, `open`, and `closed`.
 - Donor group members can submit meeting place proposals and vote in donor group polls.
@@ -697,7 +772,7 @@ Authorization: Bearer <access_token>
 - New open donor group polls create notification records and push delivery tasks for donor group members.
 - Полная спецификация push-уведомлений находится ниже в этом же файле.
 
-The `collections` app has a public REST API now. Transfer lifecycle, chats, final poll-result selection, courier assignment workflow, and video reports are still future work.
+The `collections` app has a public REST API now. Organization and donor group chats are implemented in `communications`. Final poll-result selection and video reports are still future work. The platform does not currently implement a full item transfer accounting lifecycle.
 
 
 ## Frontend Rules
@@ -750,6 +825,7 @@ POST   /api/v1/collections/donor-groups/
 GET    /api/v1/collections/donor-groups/{id}/
 PATCH  /api/v1/collections/donor-groups/{id}/
 DELETE /api/v1/collections/donor-groups/{id}/
+POST   /api/v1/collections/donor-groups/{id}/schedule-meeting-time/
 POST   /api/v1/collections/donor-groups/{id}/schedule-meeting/
 
 GET    /api/v1/collections/donor-group-members/
@@ -805,7 +881,8 @@ DELETE /api/v1/collections/poll-votes/{id}/
 - Collection items: public read; the collection author or an active organization manager creates, updates, or deletes.
 - Branch items: public read; only an active manager of the branch organization creates, updates, or deletes.
 - Donor groups: public read; the collection author or an active organization manager creates, updates, or deletes.
-- Donor group meeting scheduling: the collection author or an active organization manager manually sets or updates the group's meeting place and date. This is not tied to poll results.
+- Donor group meeting time scheduling: the collection author or an active organization manager manually sets or updates the group's meeting time through `schedule-meeting-time`.
+- Donor group meeting scheduling: the collection author or an active organization manager manually sets or updates the group's meeting place and date through `schedule-meeting`. This is not tied to poll results.
 - Donor group members: public read; the collection author or an active organization manager manages members. Accepting a donor group invitation also creates membership.
 - Donor group items: public read; the collection author or an active organization manager links user items and selected quantities.
 - Invitations: use `/api/v1/communications/invitations/` with `target_type = "donor_group"`.
@@ -897,7 +974,35 @@ Donor group responses include `meeting` when a meeting has been scheduled:
 }
 ```
 
-Schedule or reschedule donor group meeting:
+Schedule or reschedule donor group meeting time only:
+
+```http
+POST /api/v1/collections/donor-groups/{id}/schedule-meeting-time/
+```
+
+```json
+{
+  "starts_at": "2026-06-06T12:00:00+05:00",
+  "ends_at": "2026-06-06T13:00:00+05:00"
+}
+```
+
+`starts_at` is required. `ends_at` is optional and cannot be earlier than `starts_at`. This endpoint does not require meeting place data.
+
+Meeting time scheduling creates notifications for donor group members except the actor. Notification payload:
+
+```json
+{
+  "target_type": "donor_group_meeting",
+  "target_id": 1,
+  "donor_group_id": 1,
+  "event": "date_assigned"
+}
+```
+
+Possible `event` values: `date_assigned`, `time_assigned`.
+
+Schedule or reschedule donor group meeting place and time:
 
 ```http
 POST /api/v1/collections/donor-groups/{id}/schedule-meeting/
@@ -914,6 +1019,8 @@ POST /api/v1/collections/donor-groups/{id}/schedule-meeting/
 ```
 
 `starts_at` is required. Provide at least one place field: `geodata`, `street`, or `description`. Reposting or finalizing polls is not required to schedule a meeting.
+
+Meeting place and time scheduling creates notifications for donor group members except the actor. Possible notification `payload.event` values: `date_assigned`, `time_assigned`, `place_assigned`.
 
 Donor group invitation:
 
@@ -944,6 +1051,8 @@ Courier profile:
   "car_name": "Lada Largus"
 }
 ```
+
+`CourierProfile` is a user/account extension internally. The endpoint remains under `/api/v1/collections/courier-profiles/` for compatibility.
 
 Meeting place proposal:
 

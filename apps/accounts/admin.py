@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import EmailVerificationCode, User
+from .models import CourierProfile, EmailVerificationCode, User
 
 
 @admin.register(EmailVerificationCode)
@@ -10,6 +10,13 @@ class EmailVerificationCodeAdmin(admin.ModelAdmin):
     list_filter = ("used_at", "expires_at")
     search_fields = ("user__email", "user__username", "code")
     readonly_fields = ("created_at",)
+    autocomplete_fields = ("user",)
+
+
+@admin.register(CourierProfile)
+class CourierProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "car_name", "created_at")
+    search_fields = ("user__email", "car_name")
     autocomplete_fields = ("user",)
 
 
