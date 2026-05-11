@@ -30,6 +30,12 @@ def is_donor_group_member(*, donor_group, user):
     return donor_group.members.filter(user=user).exists()
 
 
+def is_donor_group_item_owner(*, donor_group_item, user):
+    if not user or not user.is_authenticated:
+        return False
+    return donor_group_item.user_item.user_id == user.id
+
+
 def is_poll_manager(*, poll, user):
     if poll.donor_group_id:
         return is_donor_group_collection_author_or_manager(
@@ -62,6 +68,25 @@ class IsReadOnlyOrUserItemOwner(BasePermission):
             return True
         user = request.user
         return bool(user and user.is_authenticated and obj.user_id == user.id)
+
+
+class IsReadOnlyOrUserItemImageOwner(BasePermission):
+    message = "Only the item owner can edit this user item image."
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and obj.user_item.user_id == user.id
+        )
 
 
 class IsReadOnlyOrCollectionAuthorOrOrganizationManager(BasePermission):
@@ -150,7 +175,7 @@ class IsReadOnlyOrDonorGroupMemberManager(BasePermission):
 
 
 class IsReadOnlyOrDonorGroupItemManager(BasePermission):
-    message = "Only the collection author or an organization manager can manage donor group items."
+    message = "Only the item owner, collection author, or organization manager can manage active donor group items."
 
     def has_permission(self, request, view):
         if request.method in SAFE_METHODS:
@@ -159,6 +184,10 @@ class IsReadOnlyOrDonorGroupItemManager(BasePermission):
 
     def has_object_permission(self, request, view, obj):
         if request.method in SAFE_METHODS:
+            return True
+        if obj.donor_group.is_delivery_completed:
+            return False
+        if is_donor_group_item_owner(donor_group_item=obj, user=request.user):
             return True
         return is_donor_group_collection_author_or_manager(
             donor_group=obj.donor_group,

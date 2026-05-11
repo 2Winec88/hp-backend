@@ -177,11 +177,16 @@ class DonorGroupMessageSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         if not is_donor_group_member(donor_group=donor_group, user=user):
             raise serializers.ValidationError("Only donor group members can write to this chat.")
+        if donor_group.is_delivery_completed:
+            raise serializers.ValidationError("Completed donor group chat is archived.")
         return donor_group
 
     def validate(self, attrs):
         if self.instance and "donor_group" in attrs and attrs["donor_group"] != self.instance.donor_group:
             raise serializers.ValidationError({"donor_group": "Donor group cannot be changed."})
+        donor_group = attrs.get("donor_group", getattr(self.instance, "donor_group", None))
+        if donor_group and donor_group.is_delivery_completed:
+            raise serializers.ValidationError("Completed donor group chat is archived.")
         text = attrs.get("text", getattr(self.instance, "text", ""))
         if not text.strip():
             raise serializers.ValidationError({"text": "Message text cannot be blank."})

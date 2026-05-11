@@ -32,6 +32,13 @@ from .models import (
     PollOption,
     PollVote,
     UserItem,
+    UserItemImage,
+)
+
+
+VALID_GIF = (
+    b"GIF87a\x01\x00\x01\x00\x80\x01\x00\x00\x00\x00\xff\xff\xff,"
+    b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
 )
 
 
@@ -395,7 +402,9 @@ class CollectionPermissionTests(TestCase):
             reverse("donor-group-item-detail", args=(donor_group_item.id,)),
             {"quantity": 1},
         )
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        donor_group_item.refresh_from_db()
+        self.assertEqual(donor_group_item.quantity, 1)
 
         self.client.force_authenticate(user=self.member)
         response = self.client.post(
@@ -429,6 +438,127 @@ class CollectionPermissionTests(TestCase):
             {"quantity": 3},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_completed_donor_group_archives_items_and_can_be_hidden(self):
+        collection = Collection.objects.create(
+            organization=self.organization,
+            created_by_member=self.member_membership,
+            branch=self.branch,
+            title="Food",
+        )
+        donor_group = DonorGroup.objects.create(
+            collection=collection,
+            created_by_member=self.member_membership,
+        )
+        DonorGroupMember.objects.create(donor_group=donor_group, user=self.donor)
+        user_item = UserItem.objects.create(
+            user=self.donor,
+            category=self.category,
+            quantity=5,
+        )
+        donor_group_item = DonorGroupItem.objects.create(
+            donor_group=donor_group,
+            user_item=user_item,
+            quantity=3,
+        )
+        CourierProfile.objects.create(user=self.donor, car_name="Lada")
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.post(
+            reverse("donor-group-complete-delivery", args=(donor_group.id,)),
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        donor_group.refresh_from_db()
+        self.assertEqual(donor_group.status, DonorGroup.Status.DELIVERY_COMPLETED)
+        self.assertIsNotNone(donor_group.completed_at)
+
+        self.client.force_authenticate(user=self.donor)
+        response = self.client.patch(
+            reverse("donor-group-item-detail", args=(donor_group_item.id,)),
+            {"quantity": 4},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(user=self.manager)
+        response = self.client.patch(
+            reverse("donor-group-item-detail", args=(donor_group_item.id,)),
+            {"quantity": 4},
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        delivered_response = self.client.get(
+            reverse("delivered-item-list"),
+            {"organization": self.organization.id},
+        )
+        self.assertEqual(delivered_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(delivered_response.data[0]["id"], donor_group_item.id)
+        self.assertEqual(delivered_response.data[0]["quantity"], 3)
+
+        summary_response = self.client.get(
+            reverse("delivered-item-summary-by-category"),
+            {"organization": self.organization.id},
+        )
+        self.assertEqual(summary_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(summary_response.data[0]["category"], self.category.id)
+        self.assertEqual(summary_response.data[0]["quantity"], 3)
+
+        courier_response = self.client.get(
+            reverse("courier-profile-detail", args=(self.donor.courier_profile.id,)),
+        )
+        self.assertEqual(courier_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(courier_response.data["deliveries_count"], 1)
+
+        hide_response = self.client.post(
+            reverse("donor-group-hide", args=(donor_group.id,)),
+        )
+        self.assertEqual(hide_response.status_code, status.HTTP_200_OK)
+        list_response = self.client.get(reverse("donor-group-list"))
+        self.assertNotIn(donor_group.id, [item["id"] for item in list_response.data])
+        visible_response = self.client.get(
+            reverse("donor-group-list"),
+            {"include_hidden": "true"},
+        )
+        self.assertIn(donor_group.id, [item["id"] for item in visible_response.data])
+
+    def test_user_item_images_are_optional_and_owned_by_user_item_owner(self):
+        user_item = UserItem.objects.create(
+            user=self.donor,
+            category=self.category,
+            quantity=2,
+        )
+
+        self.client.force_authenticate(user=self.donor)
+        response = self.client.post(
+            reverse("user-item-image-list"),
+            {
+                "user_item": user_item.id,
+                "image": SimpleUploadedFile(
+                    "item.gif",
+                    VALID_GIF,
+                    content_type="image/gif",
+                ),
+                "alt_text": "Photo",
+                "sort_order": 1,
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(UserItemImage.objects.filter(user_item=user_item).count(), 1)
+
+        self.client.force_authenticate(user=self.other)
+        forbidden_response = self.client.post(
+            reverse("user-item-image-list"),
+            {
+                "user_item": user_item.id,
+                "image": SimpleUploadedFile(
+                    "other.gif",
+                    VALID_GIF,
+                    content_type="image/gif",
+                ),
+            },
+            format="multipart",
+        )
+        self.assertEqual(forbidden_response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_collection_author_can_schedule_donor_group_parameters_manually(self):
         collection = Collection.objects.create(

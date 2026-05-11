@@ -10,23 +10,27 @@ from .views import (
     DonorGroupMemberViewSet,
     DonorGroupVideoReportViewSet,
     DonorGroupViewSet,
+    DeliveredItemViewSet,
     ItemCategoryViewSet,
     MeetingPlaceProposalViewSet,
     PollOptionViewSet,
     PollViewSet,
     PollVoteViewSet,
     UserItemViewSet,
+    UserItemImageViewSet,
 )
 
 router = DefaultRouter()
 router.register("item-categories", ItemCategoryViewSet, basename="item-category")
 router.register("user-items", UserItemViewSet, basename="user-item")
+router.register("user-item-images", UserItemImageViewSet, basename="user-item-image")
 router.register("collections", CollectionViewSet, basename="collection")
 router.register("collection-items", CollectionItemViewSet, basename="collection-item")
 router.register("branch-items", BranchItemViewSet, basename="branch-item")
 router.register("donor-groups", DonorGroupViewSet, basename="donor-group")
 router.register("donor-group-members", DonorGroupMemberViewSet, basename="donor-group-member")
 router.register("donor-group-items", DonorGroupItemViewSet, basename="donor-group-item")
+router.register("delivered-items", DeliveredItemViewSet, basename="delivered-item")
 router.register("donor-group-video-reports", DonorGroupVideoReportViewSet, basename="donor-group-video-report")
 router.register("courier-profiles", CourierProfileViewSet, basename="courier-profile")
 router.register("meeting-place-proposals", MeetingPlaceProposalViewSet, basename="meeting-place-proposal")

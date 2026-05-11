@@ -175,6 +175,8 @@ class DonorGroupMessageViewSet(viewsets.ModelViewSet):
         serializer.save(author=self.request.user)
 
     def perform_update(self, serializer):
+        if self.get_object().donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor group chat is archived.")
         if not can_manage_donor_group_message(
             message=self.get_object(),
             user=self.request.user,
@@ -183,6 +185,8 @@ class DonorGroupMessageViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def perform_destroy(self, instance):
+        if instance.donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor group chat is archived.")
         if not can_manage_donor_group_message(
             message=instance,
             user=self.request.user,

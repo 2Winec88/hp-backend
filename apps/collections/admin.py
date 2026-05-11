@@ -16,6 +16,7 @@ from .models import (
     PollOption,
     PollVote,
     UserItem,
+    UserItemImage,
 )
 
 
@@ -38,6 +39,13 @@ class UserItemAdmin(admin.ModelAdmin):
     list_display = ("user", "category", "quantity", "created_at")
     list_filter = ("category",)
     search_fields = ("user__email", "category__name", "description")
+
+
+@admin.register(UserItemImage)
+class UserItemImageAdmin(admin.ModelAdmin):
+    list_display = ("user_item", "sort_order", "created_at")
+    search_fields = ("user_item__user__email", "user_item__category__name", "alt_text")
+    autocomplete_fields = ("user_item",)
 
 
 class CollectionItemInline(admin.TabularInline):
@@ -85,7 +93,17 @@ class DonorGroupParametersInline(admin.StackedInline):
 
 @admin.register(DonorGroup)
 class DonorGroupAdmin(admin.ModelAdmin):
-    list_display = ("id", "collection", "title", "created_by_member", "created_at")
+    list_display = (
+        "id",
+        "collection",
+        "title",
+        "status",
+        "is_hidden",
+        "created_by_member",
+        "completed_at",
+        "created_at",
+    )
+    list_filter = ("status", "is_hidden")
     search_fields = ("title", "collection__title")
     inlines = (DonorGroupMemberInline, DonorGroupItemInline, DonorGroupParametersInline)
 

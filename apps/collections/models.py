@@ -4,11 +4,15 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 
-from apps.common.file_validators import video_file_validators
+from apps.common.file_validators import image_file_validators, video_file_validators
 
 
 def donor_group_video_report_upload_to(instance, filename):
     return f"donor-groups/{instance.donor_group_id or 'new'}/video-reports/{filename}"
+
+
+def user_item_image_upload_to(instance, filename):
+    return f"user-items/{instance.user_item_id or 'new'}/images/{filename}"
 
 
 class ItemCategory(models.Model):
@@ -89,6 +93,30 @@ class UserItem(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.category.name} x{self.quantity}"
+
+
+class UserItemImage(models.Model):
+    user_item = models.ForeignKey(
+        UserItem,
+        on_delete=models.CASCADE,
+        related_name="images",
+    )
+    image = models.ImageField(
+        upload_to=user_item_image_upload_to,
+        validators=image_file_validators,
+    )
+    alt_text = models.CharField(max_length=255, blank=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User item image"
+        verbose_name_plural = "User item images"
+        ordering = ("user_item", "sort_order", "id")
+
+    def __str__(self):
+        return f"{self.user_item} image #{self.pk}"
 
 
 class Collection(models.Model):
@@ -221,6 +249,10 @@ class BranchItem(models.Model):
 
 
 class DonorGroup(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DELIVERY_COMPLETED = "delivery_completed", "Delivery completed"
+
     collection = models.ForeignKey(
         Collection,
         on_delete=models.CASCADE,
@@ -232,6 +264,28 @@ class DonorGroup(models.Model):
         related_name="created_donor_groups",
     )
     title = models.CharField(max_length=200, blank=True)
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+    is_hidden = models.BooleanField(default=False)
+    completed_by_member = models.ForeignKey(
+        "organizations.OrganizationMember",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="completed_donor_group_deliveries",
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    hidden_by_member = models.ForeignKey(
+        "organizations.OrganizationMember",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="hidden_donor_groups",
+    )
+    hidden_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -242,6 +296,10 @@ class DonorGroup(models.Model):
 
     def __str__(self):
         return self.title or f"Donor group #{self.pk}"
+
+    @property
+    def is_delivery_completed(self):
+        return self.status == self.Status.DELIVERY_COMPLETED
 
     def clean(self):
         super().clean()

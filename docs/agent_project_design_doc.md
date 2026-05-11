@@ -382,6 +382,7 @@ WebSocket:
 - `DonorGroupMember`
 - `DonorGroupItem`
 - `DonorGroupVideoReport`
+- `UserItemImage`
 - `MeetingPlaceProposal`
 - `Poll`
 - `PollOption`
@@ -389,19 +390,22 @@ WebSocket:
 
 Текущее решение для MVP: `ItemCategory` используется как конкретный тип вещи/потребности, например "Зубная гигиена", "Питьевая вода", "Куртки". Поле `description` хранит примеры содержимого категории. Не дублировать это описание в будущих связующих моделях вроде `UserItem` и `CollectionItem`; там должны жить контекстные поля пользователя или сбора.
 
-Сейчас реализован слой сборов: пользовательские вещи, сборы организаций с `geodata`, позиции сборов, вещи, принимаемые филиалами, донорские группы, предложения мест встречи и голосования. `CollectionUserItem` намеренно не добавлен: организатор пока вручную смотрит публичные `UserItem` и координирует передачу вне автоматического матчинга.
+Сейчас реализован слой сборов: пользовательские вещи с опциональными фотографиями, сборы организаций с `geodata`, позиции сборов, вещи, принимаемые филиалами, донорские группы, предложения мест встречи и голосования. `CollectionUserItem` намеренно не добавлен: организатор пока вручную смотрит публичные `UserItem` и координирует передачу вне автоматического матчинга.
 
-Донорские группы привязаны к `Collection`. `DonorGroupMember` связывает пользователей с группой, `DonorGroupItem` хранит выбранный организатором `UserItem` и количество вещей пользователя для этой группы. Приглашения в донорскую группу идут через общий механизм `communications.Invitation` с `target_type="donor_group"` и при accept создают membership.
+Донорские группы привязаны к `Collection`. `DonorGroupMember` связывает пользователей с группой, `DonorGroupItem` хранит выбранный `UserItem` и количество вещей пользователя для этой группы. До завершения доставки количество может менять владелец вещи, автор сбора или менеджер организации. Приглашения в донорскую группу идут через общий механизм `communications.Invitation` с `target_type="donor_group"` и при accept создают membership.
+
+`DonorGroup.status` хранит жизненный цикл группы: `active` или `delivery_completed`. Автор сбора или менеджер организации завершает доставку через `POST /api/v1/collections/donor-groups/{id}/complete-delivery/`. После этого группа архивируется: количество вещей, чат и медиаматериалы больше нельзя менять. Завершённую группу можно скрыть с frontend через `POST /api/v1/collections/donor-groups/{id}/hide/`; по умолчанию скрытые группы не попадают в list, но доступны через `include_hidden=true`.
 
 `DonorGroupParameters` хранит вручную назначенные параметры донорской группы: дату/время и, опционально, место сбора. Время можно назначить отдельно через `POST /api/v1/collections/donor-groups/{id}/set-parameters-time/`; место и время вместе можно назначить через `POST /api/v1/collections/donor-groups/{id}/set-parameters/`. Старые `schedule-meeting*` URLs остаются alias-ручками для совместимости. Эти действия не привязаны к итогам голосований.
 
-Фронтовые агрегаты реализованы без отдельного полного цикла передачи вещей:
+Фронтовые агрегаты используют `DonorGroupItem` как выбранные вещи до завершения группы и как факт передачи после `delivery_completed`:
 
-- `Collection` отдаёт `quantity_required_total`, `quantity_selected_total`, `donor_groups_count`, `donor_group_members_count`, `donor_group_items_count`;
-- `CollectionItem` отдаёт `selected_quantity` и `remaining_quantity` по категории внутри сбора;
-- `UserItem` отдаёт `selected_quantity` и `available_quantity`; query param `collection` ограничивает расчёт выбранными вещами в донорских группах конкретного сбора.
+- `Collection` отдаёт `quantity_required_total`, `quantity_selected_total`, `quantity_delivered_total`, `donor_groups_count`, `donor_group_members_count`, `donor_group_items_count`;
+- `CollectionItem` отдаёт `selected_quantity`, `delivered_quantity` и `remaining_quantity` по категории внутри сбора;
+- `UserItem` отдаёт `selected_quantity`, `available_quantity`, `delivered_quantity`; query param `collection` ограничивает расчёт выбранными вещами в донорских группах конкретного сбора;
+- `/api/v1/collections/delivered-items/` отдаёт завершённые вещи с фильтрами `organization`, `collection`, `branch`, `donor_group`, `user`, `category`, а также summary endpoints по категориям и пользователям.
 
-`DonorGroupVideoReport` хранит видеоотчёт, загруженный участником donor group, и привязан напрямую к `DonorGroup` без дополнительной группировки. Читать отчёты могут участники группы, автор сбора и менеджеры организации; загружать могут участники группы.
+`DonorGroupVideoReport` хранит видеоотчёт, загруженный участником donor group, и привязан напрямую к `DonorGroup` без дополнительной группировки. Читать отчёты могут участники группы, автор сбора и менеджеры организации; загружать могут участники группы до завершения доставки.
 
 Назначение даты, времени и места создаёт существующие `communications.Notification` для участников donor group, кроме пользователя, который выполнил действие. В `payload` используется `target_type="donor_group_parameters"` и `event`: `date_assigned`, `time_assigned`, `place_assigned`.
 
@@ -643,7 +647,7 @@ uv run python manage.py makemigrations --check --dry-run
 Current implementation note, 2026-05-09:
 
 - Organization branches are implemented.
-- Core collections CRUD is implemented: collections, user items, collection items, branch items, donor groups, donor group members, donor group items, frontend aggregate fields, and donor group video reports. Courier profile API remains exposed under collections for compatibility, while the model belongs to accounts.
+- Core collections CRUD is implemented: collections, user items, user item images, collection items, branch items, donor groups, donor group lifecycle, donor group members, donor group items, delivered item aggregate endpoints, frontend aggregate fields, and donor group video reports. Courier profile API remains exposed under collections for compatibility, while the model belongs to accounts.
 - Donor group invitations are implemented through `communications.Invitation` with `target_type="donor_group"`.
 - Donor group parameters scheduling is implemented: collection authors and organization managers manually set a donor group's date/time through `set-parameters-time`, or place and date/time through `set-parameters`; legacy `schedule-meeting*` aliases remain for compatibility.
 - Push delivery is implemented as an additional `Notification` delivery channel.

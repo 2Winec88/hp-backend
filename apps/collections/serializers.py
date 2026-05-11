@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from django.db.models import Sum
+from django.db.models import Count, Sum
 
 from apps.accounts.models import CourierProfile
 from apps.organizations.models import OrganizationMember
@@ -20,10 +20,12 @@ from .models import (
     PollOption,
     PollVote,
     UserItem,
+    UserItemImage,
 )
 from .permissions import (
     is_donor_group_member,
     is_collection_author_or_manager,
+    is_donor_group_item_owner,
     is_donor_group_collection_author_or_manager,
     is_poll_manager,
 )
@@ -44,11 +46,44 @@ class ItemCategorySerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class UserItemImageSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(source="user_item.user", read_only=True)
+
+    class Meta:
+        model = UserItemImage
+        fields = (
+            "id",
+            "user_item",
+            "user",
+            "image",
+            "alt_text",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "user", "created_at", "updated_at")
+
+    def validate_user_item(self, user_item):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated or user_item.user_id != user.id:
+            raise serializers.ValidationError("Only the item owner can manage images.")
+        return user_item
+
+    def validate(self, attrs):
+        if self.instance and "user_item" in attrs and attrs["user_item"] != self.instance.user_item:
+            raise serializers.ValidationError({"user_item": "User item cannot be changed."})
+        return attrs
+
+
 class UserItemSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
     selected_quantity = serializers.SerializerMethodField()
     available_quantity = serializers.SerializerMethodField()
+    delivered_quantity = serializers.SerializerMethodField()
+    images = UserItemImageSerializer(many=True, read_only=True)
+    images_count = serializers.SerializerMethodField()
 
     class Meta:
         model = UserItem
@@ -61,7 +96,10 @@ class UserItemSerializer(serializers.ModelSerializer):
             "quantity",
             "selected_quantity",
             "available_quantity",
+            "delivered_quantity",
             "description",
+            "images",
+            "images_count",
             "created_at",
             "updated_at",
         )
@@ -72,6 +110,9 @@ class UserItemSerializer(serializers.ModelSerializer):
             "category_name",
             "selected_quantity",
             "available_quantity",
+            "delivered_quantity",
+            "images",
+            "images_count",
             "created_at",
             "updated_at",
         )
@@ -87,10 +128,24 @@ class UserItemSerializer(serializers.ModelSerializer):
     def get_available_quantity(self, obj):
         return max(obj.quantity - self.get_selected_quantity(obj), 0)
 
+    def get_delivered_quantity(self, obj):
+        queryset = obj.donor_group_items.filter(
+            donor_group__status=DonorGroup.Status.DELIVERY_COMPLETED,
+        )
+        request = self.context.get("request")
+        collection_id = getattr(request, "query_params", {}).get("collection") if request else None
+        if collection_id:
+            queryset = queryset.filter(donor_group__collection_id=collection_id)
+        return queryset.aggregate(total=Sum("quantity"))["total"] or 0
+
+    def get_images_count(self, obj):
+        return obj.images.count()
+
 
 class CollectionItemSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source="category.name", read_only=True)
     selected_quantity = serializers.SerializerMethodField()
+    delivered_quantity = serializers.SerializerMethodField()
     remaining_quantity = serializers.SerializerMethodField()
 
     class Meta:
@@ -102,6 +157,7 @@ class CollectionItemSerializer(serializers.ModelSerializer):
             "category_name",
             "quantity_required",
             "selected_quantity",
+            "delivered_quantity",
             "remaining_quantity",
             "description",
             "created_at",
@@ -111,6 +167,7 @@ class CollectionItemSerializer(serializers.ModelSerializer):
             "id",
             "category_name",
             "selected_quantity",
+            "delivered_quantity",
             "remaining_quantity",
             "created_at",
             "updated_at",
@@ -119,6 +176,13 @@ class CollectionItemSerializer(serializers.ModelSerializer):
     def get_selected_quantity(self, obj):
         return DonorGroupItem.objects.filter(
             donor_group__collection=obj.collection,
+            user_item__category=obj.category,
+        ).aggregate(total=Sum("quantity"))["total"] or 0
+
+    def get_delivered_quantity(self, obj):
+        return DonorGroupItem.objects.filter(
+            donor_group__collection=obj.collection,
+            donor_group__status=DonorGroup.Status.DELIVERY_COMPLETED,
             user_item__category=obj.category,
         ).aggregate(total=Sum("quantity"))["total"] or 0
 
@@ -149,9 +213,11 @@ class CollectionSerializer(serializers.ModelSerializer):
     items_count = serializers.SerializerMethodField()
     quantity_required_total = serializers.SerializerMethodField()
     quantity_selected_total = serializers.SerializerMethodField()
+    quantity_delivered_total = serializers.SerializerMethodField()
     donor_groups_count = serializers.SerializerMethodField()
     donor_group_members_count = serializers.SerializerMethodField()
     donor_group_items_count = serializers.SerializerMethodField()
+    donor_groups_delivery_completed_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Collection
@@ -171,9 +237,11 @@ class CollectionSerializer(serializers.ModelSerializer):
             "items_count",
             "quantity_required_total",
             "quantity_selected_total",
+            "quantity_delivered_total",
             "donor_groups_count",
             "donor_group_members_count",
             "donor_group_items_count",
+            "donor_groups_delivery_completed_count",
             "created_at",
             "updated_at",
         )
@@ -185,9 +253,11 @@ class CollectionSerializer(serializers.ModelSerializer):
             "items_count",
             "quantity_required_total",
             "quantity_selected_total",
+            "quantity_delivered_total",
             "donor_groups_count",
             "donor_group_members_count",
             "donor_group_items_count",
+            "donor_groups_delivery_completed_count",
             "created_at",
             "updated_at",
         )
@@ -203,6 +273,12 @@ class CollectionSerializer(serializers.ModelSerializer):
             donor_group__collection=obj,
         ).aggregate(total=Sum("quantity"))["total"] or 0
 
+    def get_quantity_delivered_total(self, obj):
+        return DonorGroupItem.objects.filter(
+            donor_group__collection=obj,
+            donor_group__status=DonorGroup.Status.DELIVERY_COMPLETED,
+        ).aggregate(total=Sum("quantity"))["total"] or 0
+
     def get_donor_groups_count(self, obj):
         return obj.donor_groups.count()
 
@@ -211,6 +287,11 @@ class CollectionSerializer(serializers.ModelSerializer):
 
     def get_donor_group_items_count(self, obj):
         return DonorGroupItem.objects.filter(donor_group__collection=obj).count()
+
+    def get_donor_groups_delivery_completed_count(self, obj):
+        return obj.donor_groups.filter(
+            status=DonorGroup.Status.DELIVERY_COMPLETED,
+        ).count()
 
     def validate_organization(self, organization):
         request = self.context.get("request")
@@ -317,6 +398,13 @@ class DonorGroupItemSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(source="user_item.user", read_only=True)
     category = serializers.PrimaryKeyRelatedField(source="user_item.category", read_only=True)
     category_name = serializers.CharField(source="user_item.category.name", read_only=True)
+    donor_group_status = serializers.CharField(source="donor_group.status", read_only=True)
+    collection = serializers.PrimaryKeyRelatedField(source="donor_group.collection", read_only=True)
+    collection_title = serializers.CharField(source="donor_group.collection.title", read_only=True)
+    organization = serializers.PrimaryKeyRelatedField(source="donor_group.collection.organization", read_only=True)
+    organization_name = serializers.CharField(source="donor_group.collection.organization.official_name", read_only=True)
+    branch = serializers.PrimaryKeyRelatedField(source="donor_group.collection.branch", read_only=True)
+    delivered_at = serializers.DateTimeField(source="donor_group.completed_at", read_only=True)
 
     class Meta:
         model = DonorGroupItem
@@ -327,22 +415,43 @@ class DonorGroupItemSerializer(serializers.ModelSerializer):
             "user",
             "category",
             "category_name",
+            "donor_group_status",
+            "collection",
+            "collection_title",
+            "organization",
+            "organization_name",
+            "branch",
             "quantity",
+            "delivered_at",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "user", "category", "category_name", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "user",
+            "category",
+            "category_name",
+            "donor_group_status",
+            "collection",
+            "collection_title",
+            "organization",
+            "organization_name",
+            "branch",
+            "delivered_at",
+            "created_at",
+            "updated_at",
+        )
 
     def validate_donor_group(self, donor_group):
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        if not is_donor_group_collection_author_or_manager(
+        if donor_group.is_delivery_completed:
+            raise serializers.ValidationError("Completed donor group items cannot be changed.")
+        if is_donor_group_collection_author_or_manager(
             donor_group=donor_group,
             user=user,
         ):
-            raise serializers.ValidationError(
-                "Only the collection author or an organization manager can manage donor group items."
-            )
+            return donor_group
         return donor_group
 
     def validate(self, attrs):
@@ -352,6 +461,19 @@ class DonorGroupItemSerializer(serializers.ModelSerializer):
         user_item = attrs.get("user_item", getattr(self.instance, "user_item", None))
         donor_group = attrs.get("donor_group", getattr(self.instance, "donor_group", None))
         quantity = attrs.get("quantity", getattr(self.instance, "quantity", None))
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if self.instance and self.instance.donor_group.is_delivery_completed:
+            raise serializers.ValidationError("Completed donor group items cannot be changed.")
+        if donor_group and donor_group.is_delivery_completed:
+            raise serializers.ValidationError({"donor_group": "Completed donor group items cannot be changed."})
+        if user_item and user and not (
+            user_item.user_id == user.id
+            or (donor_group and is_donor_group_collection_author_or_manager(donor_group=donor_group, user=user))
+        ):
+            raise serializers.ValidationError(
+                "Only the item owner, collection author, or organization manager can manage donor group items."
+            )
         if user_item and quantity and quantity > user_item.quantity:
             raise serializers.ValidationError(
                 {"quantity": "Selected quantity cannot exceed the user's item quantity."}
@@ -445,6 +567,7 @@ class DonorGroupSerializer(serializers.ModelSerializer):
     members_count = serializers.SerializerMethodField()
     items_count = serializers.SerializerMethodField()
     video_reports_count = serializers.SerializerMethodField()
+    delivered_quantity_total = serializers.SerializerMethodField()
 
     class Meta:
         model = DonorGroup
@@ -453,24 +576,38 @@ class DonorGroupSerializer(serializers.ModelSerializer):
             "collection",
             "created_by_member",
             "title",
+            "status",
+            "is_hidden",
+            "completed_by_member",
+            "completed_at",
+            "hidden_by_member",
+            "hidden_at",
             "members",
             "items",
             "parameters",
             "members_count",
             "items_count",
             "video_reports_count",
+            "delivered_quantity_total",
             "created_at",
             "updated_at",
         )
         read_only_fields = (
             "id",
             "created_by_member",
+            "status",
+            "is_hidden",
+            "completed_by_member",
+            "completed_at",
+            "hidden_by_member",
+            "hidden_at",
             "members",
             "items",
             "parameters",
             "members_count",
             "items_count",
             "video_reports_count",
+            "delivered_quantity_total",
             "created_at",
             "updated_at",
         )
@@ -483,6 +620,11 @@ class DonorGroupSerializer(serializers.ModelSerializer):
 
     def get_video_reports_count(self, obj):
         return obj.video_reports.count()
+
+    def get_delivered_quantity_total(self, obj):
+        if obj.status != DonorGroup.Status.DELIVERY_COMPLETED:
+            return 0
+        return obj.items.aggregate(total=Sum("quantity"))["total"] or 0
 
     def validate_collection(self, collection):
         request = self.context.get("request")
@@ -501,6 +643,7 @@ class DonorGroupSerializer(serializers.ModelSerializer):
 
 class CourierProfileSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
+    deliveries_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CourierProfile
@@ -509,10 +652,24 @@ class CourierProfileSerializer(serializers.ModelSerializer):
             "user",
             "user_email",
             "car_name",
+            "deliveries_count",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "user", "user_email", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "user",
+            "user_email",
+            "deliveries_count",
+            "created_at",
+            "updated_at",
+        )
+
+    def get_deliveries_count(self, obj):
+        return DonorGroup.objects.filter(
+            status=DonorGroup.Status.DELIVERY_COMPLETED,
+            members__user=obj.user,
+        ).distinct().count()
 
 
 class MeetingPlaceProposalSerializer(serializers.ModelSerializer):
@@ -831,9 +988,26 @@ class DonorGroupVideoReportSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         if not is_donor_group_member(donor_group=donor_group, user=user):
             raise serializers.ValidationError("Only donor group members can upload video reports.")
+        if donor_group.is_delivery_completed:
+            raise serializers.ValidationError("Completed donor group media is archived.")
         return donor_group
 
     def validate(self, attrs):
         if self.instance and "donor_group" in attrs and attrs["donor_group"] != self.instance.donor_group:
             raise serializers.ValidationError({"donor_group": "Donor group cannot be changed."})
+        donor_group = attrs.get("donor_group", getattr(self.instance, "donor_group", None))
+        if donor_group and donor_group.is_delivery_completed:
+            raise serializers.ValidationError("Completed donor group media is archived.")
         return attrs
+
+
+class DeliveredItemSummarySerializer(serializers.Serializer):
+    category = serializers.IntegerField()
+    category_name = serializers.CharField()
+    quantity = serializers.IntegerField()
+
+
+class DeliveredItemUserSummarySerializer(serializers.Serializer):
+    user = serializers.IntegerField()
+    user_email = serializers.EmailField()
+    quantity = serializers.IntegerField()

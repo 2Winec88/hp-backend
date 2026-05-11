@@ -124,6 +124,8 @@ class DonorGroupChatConsumer(AsyncJsonWebsocketConsumer):
             donor_group = DonorGroup.objects.get(pk=self.donor_group_id)
         except DonorGroup.DoesNotExist:
             return False
+        if donor_group.is_delivery_completed:
+            return False
         return is_donor_group_member(donor_group=donor_group, user=user)
 
     @database_sync_to_async

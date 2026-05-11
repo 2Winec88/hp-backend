@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework import permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -25,6 +25,7 @@ from .models import (
     PollOption,
     PollVote,
     UserItem,
+    UserItemImage,
 )
 from .permissions import (
     IsReadOnlyOrBranchItemOrganizationManager,
@@ -39,6 +40,7 @@ from .permissions import (
     IsReadOnlyOrPollOptionManager,
     IsPollVoteOwner,
     IsReadOnlyOrUserItemOwner,
+    IsReadOnlyOrUserItemImageOwner,
     is_donor_group_collection_author_or_manager,
 )
 from .serializers import (
@@ -61,6 +63,7 @@ from .serializers import (
     PollSerializer,
     PollVoteSerializer,
     UserItemSerializer,
+    UserItemImageSerializer,
 )
 
 
@@ -141,7 +144,7 @@ class UserItemViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
-        queryset = UserItem.objects.select_related("user", "category")
+        queryset = UserItem.objects.select_related("user", "category").prefetch_related("images")
         user_id = self.request.query_params.get("user")
         if user_id:
             queryset = queryset.filter(user_id=user_id)
@@ -155,6 +158,26 @@ class UserItemViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+
+class UserItemImageViewSet(viewsets.ModelViewSet):
+    serializer_class = UserItemImageSerializer
+    permission_classes = [IsReadOnlyOrUserItemImageOwner]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        queryset = UserItemImage.objects.select_related(
+            "user_item",
+            "user_item__user",
+            "user_item__category",
+        )
+        user_item_id = self.request.query_params.get("user_item")
+        if user_item_id:
+            queryset = queryset.filter(user_item_id=user_item_id)
+        user_id = self.request.query_params.get("user")
+        if user_id:
+            queryset = queryset.filter(user_item__user_id=user_id)
+        return queryset
 
 
 class CollectionViewSet(viewsets.ModelViewSet):
@@ -264,6 +287,12 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
         collection_id = self.request.query_params.get("collection")
         if collection_id:
             queryset = queryset.filter(collection_id=collection_id)
+        include_hidden = self.request.query_params.get("include_hidden")
+        if include_hidden is None or include_hidden.lower() not in ("1", "true", "yes"):
+            queryset = queryset.filter(is_hidden=False)
+        status_value = self.request.query_params.get("status")
+        if status_value:
+            queryset = queryset.filter(status=status_value)
         return queryset
 
     def perform_create(self, serializer):
@@ -274,6 +303,96 @@ class DonorGroupViewSet(viewsets.ModelViewSet):
             is_active=True,
         )
         serializer.save(created_by_member=member)
+
+    def perform_update(self, serializer):
+        donor_group = self.get_object()
+        if donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor groups are archived.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.is_delivery_completed:
+            raise PermissionDenied("Completed donor groups are archived and can only be hidden.")
+        instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="complete-delivery")
+    def complete_delivery(self, request, pk=None):
+        donor_group = self.get_object()
+        if not is_donor_group_collection_author_or_manager(
+            donor_group=donor_group,
+            user=request.user,
+        ):
+            return Response(
+                {"detail": "Only the collection author or an organization manager can complete delivery."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if donor_group.is_delivery_completed:
+            return Response(self.get_serializer(donor_group).data, status=status.HTTP_200_OK)
+        member = OrganizationMember.objects.get(
+            organization=donor_group.collection.organization,
+            user=request.user,
+            is_active=True,
+        )
+        donor_group.status = DonorGroup.Status.DELIVERY_COMPLETED
+        donor_group.completed_by_member = member
+        donor_group.completed_at = timezone.now()
+        donor_group.save(
+            update_fields=(
+                "status",
+                "completed_by_member",
+                "completed_at",
+                "updated_at",
+            )
+        )
+        return Response(self.get_serializer(donor_group).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="hide")
+    def hide(self, request, pk=None):
+        donor_group = self.get_object()
+        if not is_donor_group_collection_author_or_manager(
+            donor_group=donor_group,
+            user=request.user,
+        ):
+            return Response(
+                {"detail": "Only the collection author or an organization manager can hide donor groups."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not donor_group.is_delivery_completed:
+            return Response(
+                {"detail": "Only completed donor groups can be hidden."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        member = OrganizationMember.objects.get(
+            organization=donor_group.collection.organization,
+            user=request.user,
+            is_active=True,
+        )
+        donor_group.is_hidden = True
+        donor_group.hidden_by_member = member
+        donor_group.hidden_at = timezone.now()
+        donor_group.save(
+            update_fields=("is_hidden", "hidden_by_member", "hidden_at", "updated_at")
+        )
+        return Response(self.get_serializer(donor_group).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unhide")
+    def unhide(self, request, pk=None):
+        donor_group = self.get_object()
+        if not is_donor_group_collection_author_or_manager(
+            donor_group=donor_group,
+            user=request.user,
+        ):
+            return Response(
+                {"detail": "Only the collection author or an organization manager can unhide donor groups."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        donor_group.is_hidden = False
+        donor_group.hidden_by_member = None
+        donor_group.hidden_at = None
+        donor_group.save(
+            update_fields=("is_hidden", "hidden_by_member", "hidden_at", "updated_at")
+        )
+        return Response(self.get_serializer(donor_group).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="schedule-meeting")
     def schedule_meeting(self, request, pk=None):
@@ -417,7 +536,20 @@ class DonorGroupItemViewSet(viewsets.ModelViewSet):
         user_item_id = self.request.query_params.get("user_item")
         if user_item_id:
             queryset = queryset.filter(user_item_id=user_item_id)
+        user_id = self.request.query_params.get("user")
+        if user_id:
+            queryset = queryset.filter(user_item__user_id=user_id)
         return queryset
+
+    def perform_update(self, serializer):
+        if self.get_object().donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor group items cannot be changed.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor group items cannot be changed.")
+        instance.delete()
 
 
 class DonorGroupVideoReportViewSet(viewsets.ModelViewSet):
@@ -452,6 +584,9 @@ class DonorGroupVideoReportViewSet(viewsets.ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        donor_group = serializer.validated_data["donor_group"]
+        if donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor group media is archived.")
         serializer.save(uploaded_by=self.request.user)
 
     def perform_update(self, serializer):
@@ -463,6 +598,8 @@ class DonorGroupVideoReportViewSet(viewsets.ModelViewSet):
             raise PermissionDenied(
                 "Only the uploader or group manager can edit this video report."
             )
+        if report.donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor group media is archived.")
         serializer.save()
 
     def perform_destroy(self, instance):
@@ -473,7 +610,95 @@ class DonorGroupVideoReportViewSet(viewsets.ModelViewSet):
             raise PermissionDenied(
                 "Only the uploader or group manager can delete this video report."
             )
+        if instance.donor_group.is_delivery_completed:
+            raise PermissionDenied("Completed donor group media is archived.")
         instance.delete()
+
+
+class DeliveredItemViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = DonorGroupItemSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        queryset = DonorGroupItem.objects.select_related(
+            "donor_group",
+            "donor_group__collection",
+            "donor_group__collection__organization",
+            "donor_group__collection__branch",
+            "donor_group__collection__created_by_member",
+            "donor_group__collection__created_by_member__user",
+            "user_item",
+            "user_item__user",
+            "user_item__category",
+        ).filter(donor_group__status=DonorGroup.Status.DELIVERY_COMPLETED)
+
+        managed_org_ids = OrganizationMember.objects.filter(
+            user=user,
+            is_active=True,
+            role=OrganizationMember.Role.MANAGER,
+        ).values_list("organization_id", flat=True)
+        queryset = queryset.filter(
+            Q(user_item__user=user)
+            | Q(donor_group__collection__created_by_member__user=user)
+            | Q(donor_group__collection__organization_id__in=managed_org_ids)
+        ).distinct()
+
+        organization_id = self.request.query_params.get("organization")
+        if organization_id:
+            queryset = queryset.filter(donor_group__collection__organization_id=organization_id)
+        collection_id = self.request.query_params.get("collection")
+        if collection_id:
+            queryset = queryset.filter(donor_group__collection_id=collection_id)
+        branch_id = self.request.query_params.get("branch")
+        if branch_id:
+            queryset = queryset.filter(donor_group__collection__branch_id=branch_id)
+        donor_group_id = self.request.query_params.get("donor_group")
+        if donor_group_id:
+            queryset = queryset.filter(donor_group_id=donor_group_id)
+        user_id = self.request.query_params.get("user")
+        if user_id:
+            queryset = queryset.filter(user_item__user_id=user_id)
+        category_id = self.request.query_params.get("category")
+        if category_id:
+            queryset = queryset.filter(user_item__category_id=category_id)
+        return queryset
+
+    @action(detail=False, methods=["get"], url_path="summary-by-category")
+    def summary_by_category(self, request):
+        rows = (
+            self.get_queryset()
+            .values("user_item__category", "user_item__category__name")
+            .annotate(quantity=Sum("quantity"))
+            .order_by("user_item__category__name")
+        )
+        data = [
+            {
+                "category": row["user_item__category"],
+                "category_name": row["user_item__category__name"],
+                "quantity": row["quantity"] or 0,
+            }
+            for row in rows
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="summary-by-user")
+    def summary_by_user(self, request):
+        rows = (
+            self.get_queryset()
+            .values("user_item__user", "user_item__user__email")
+            .annotate(quantity=Sum("quantity"))
+            .order_by("user_item__user__email")
+        )
+        data = [
+            {
+                "user": row["user_item__user"],
+                "user_email": row["user_item__user__email"],
+                "quantity": row["quantity"] or 0,
+            }
+            for row in rows
+        ]
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class CourierProfileViewSet(viewsets.ModelViewSet):
