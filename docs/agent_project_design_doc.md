@@ -89,10 +89,11 @@ Email verification отправляется через Celery-задачу `send
 
 ### `apps.common`
 
-Current geodata note, 2026-05-08:
+Current geodata note, 2026-05-11:
 
 - `Region` and `City` no longer store `geoname_id`.
-- Current production import path is the Russian JSON dataset handled by `import_russia_locations`.
+- Current production import path is the allsettlements Excel dataset handled by `sync_allsettlements_regions` and `import_allsettlements_locations`.
+- The older JSON import command `import_russia_locations` remains available for compatible external JSON datasets.
 - `Region` and `City` remain read-only in public API.
 - `GeoData` is still the reusable location record for users, branches, events, and collections.
 
@@ -109,7 +110,7 @@ Current geodata note, 2026-05-08:
 `Region`:
 
 - справочник регионов;
-- наполняется через русскоязычный JSON import командой `import_russia_locations` или административным backend-процессом;
+- наполняется через Excel import командой `sync_allsettlements_regions`, совместимый JSON import `import_russia_locations` или административным backend-процессом;
 - не создаётся через публичный API;
 - поддерживает autocomplete через `GET /api/v1/common/regions/?search=...`;
 - содержит `name`, координаты региона, `country_code`;
@@ -118,7 +119,7 @@ Current geodata note, 2026-05-08:
 `City`:
 
 - справочник городов;
-- наполняется через русскоязычный JSON import командой `import_russia_locations` или административным backend-процессом;
+- наполняется через Excel import командой `import_allsettlements_locations`, совместимый JSON import `import_russia_locations` или административным backend-процессом;
 - не создаётся через публичный API;
 - поддерживает autocomplete через `GET /api/v1/common/cities/?search=...`;
 - содержит `name`, координаты города, `country_code`, ссылку на `Region`;
@@ -141,7 +142,7 @@ Current geodata note, 2026-05-08:
 - `GET /api/v1/common/regions/{id}/`
 - `GET/POST/PATCH/DELETE /api/v1/common/geodata/`
 
-Важно: `Region` и `City` read-only для публичного API. Регионы и города должны заводиться через `import_russia_locations`, миграции seed-данных или административный backend-процесс.
+Важно: `Region` и `City` read-only для публичного API. Регионы и города должны заводиться через `sync_allsettlements_regions` / `import_allsettlements_locations`, `import_russia_locations`, миграции seed-данных или административный backend-процесс.
 
 В dev/test базу через migration загружен небольшой тестовый набор городов из разных частей России: Kaliningrad, Murmansk, Saint Petersburg, Moscow, Sochi, Yekaterinburg, Novosibirsk, Yakutsk, Vladivostok, Petropavlovsk-Kamchatsky.
 
@@ -491,7 +492,7 @@ WebSocket:
 
 Правила:
 
-- `City` — read-only API, импортируется через `import_russia_locations` или административный backend-процесс.
+- `City` — read-only API, импортируется через `import_allsettlements_locations`, `import_russia_locations` или административный backend-процесс.
 - `GeoData` можно создавать через API.
 - `latitude` допустима от `-90` до `90`.
 - `longitude` допустима от `-180` до `180`.
@@ -626,7 +627,7 @@ uv run python manage.py makemigrations --check --dry-run
 ## 12. Важные архитектурные решения
 
 1. `common` — место для всего общего и переиспользуемого.
-2. Города не создаются через публичный API. Источник городов — JSON import `import_russia_locations`, seed-миграции или административный backend-процесс.
+2. Города не создаются через публичный API. Источник городов — Excel import `import_allsettlements_locations`, совместимый JSON import `import_russia_locations`, seed-миграции или административный backend-процесс.
 3. `GeoData` — общая модель местоположения.
 4. `is_online` — свойство мероприятия, не свойство геоданных.
 5. Организационные новости принадлежат организации, не мероприятию.
@@ -666,7 +667,8 @@ Current implementation note, 2026-05-09:
    - Keep manual `set-parameters` available as a separate organizer action.
 
 4. Location import maintenance.
-   - Русскоязычный JSON import: `uv run python manage.py import_russia_locations`.
+   - Основной Excel import: `uv run python manage.py sync_allsettlements_regions`, затем `uv run python manage.py import_allsettlements_locations`.
+   - Совместимый JSON import: `uv run python manage.py import_russia_locations --regions <path> --cities <path>`.
    - Загружать регионы в `common.Region`.
    - Загружать города в `common.City`.
    - Не менять текущую схему `GeoData`: адресная строка остается optional, координаты хранятся отдельно.

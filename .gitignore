@@ -21,6 +21,7 @@ db.sqlite3-journal
 docs/geonames_data.txt
 docs/geonames_data_*.txt
 docs/geonames_dump*.txt
+docs/data_allsettlements_anon_*.xlsx
 
 # Django generated files
 media/

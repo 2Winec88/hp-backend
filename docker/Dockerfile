@@ -5,14 +5,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY pyproject.toml uv.lock ./
 
 RUN pip install --no-cache-dir \
     "celery>=5.6.3" \
+    "daphne>=4.2.1" \
     "channels[daphne]>=4.3.2" \
     "channels-redis>=4.3.0" \
     "Django>=6.0.4" \
@@ -27,7 +24,9 @@ RUN pip install --no-cache-dir \
     "psycopg2-binary>=2.9.11" \
     "pyjwt>=2.12.1" \
     "python-decouple>=3.8" \
-    "redis>=7.4.0"
+    "redis>=7.4.0" \
+    "python-dotenv>=1.2.2" \
+    "openpyxl>=3.1.5"
 
 COPY . .
 

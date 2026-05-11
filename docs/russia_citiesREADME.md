@@ -1,6 +1,15 @@
 # Города и регионы России со склонениями
 
-> Russia cities and regions JSON dataset
+> Legacy Russia cities and regions JSON dataset
+
+## Статус
+
+Бандл `russia-regions.json` / `russia-cities.json` больше не хранится в репозитории. Текущий production-путь загрузки геоданных использует allsettlements Excel dataset:
+
+- `sync_allsettlements_regions`
+- `import_allsettlements_locations`
+
+Команда `import_russia_locations` оставлена для совместимых внешних JSON-файлов, если они переданы через `--regions` и `--cities`.
 
 ## Описание файлов
 

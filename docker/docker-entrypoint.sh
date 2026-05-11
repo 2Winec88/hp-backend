@@ -23,4 +23,4 @@ PY
 
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
-python manage.py runserver 0.0.0.0:8000
+daphne -b 0.0.0.0 -p 8000 hp_backend.asgi:application

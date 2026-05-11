@@ -1,7 +1,9 @@
 import json
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from openpyxl import Workbook
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -116,6 +118,135 @@ class ImportRussiaLocationsCommandTests(TestCase):
         city = City.objects.get(name="Тестоград")
         self.assertEqual(str(city.latitude), "56.111111")
         self.assertEqual(str(city.longitude), "60.222222")
+
+
+class ImportAllsettlementsLocationsCommandTests(TestCase):
+    headers = (
+        "object_level",
+        "object_name",
+        "region",
+        "settlement",
+        "latitude_dadata",
+        "longitude_dadata",
+    )
+
+    def test_imports_settlements_without_creating_duplicates(self):
+        Region.objects.create(name="Республика Тест", country_code="RU")
+
+        with TemporaryDirectory() as temp_dir:
+            dataset_path = Path(temp_dir) / "allsettlements.xlsx"
+            self._write_dataset(
+                dataset_path,
+                [
+                    (
+                        "Регион",
+                        "Республика Тест",
+                        "Республика Тест",
+                        "",
+                        "",
+                        "",
+                    ),
+                    (
+                        "Населенный пункт",
+                        "поселок Новый",
+                        "Республика Тест",
+                        "поселок Новый",
+                        "56.1234564",
+                        "60.6543214",
+                    ),
+                    (
+                        "Населенный пункт",
+                        "поселок Новый",
+                        "Республика Тест",
+                        "поселок Новый",
+                        "57.000000",
+                        "61.000000",
+                    ),
+                ],
+            )
+
+            call_command("import_allsettlements_locations", file=str(dataset_path))
+            call_command("import_allsettlements_locations", file=str(dataset_path))
+
+        city = City.objects.get(name="поселок Новый")
+        self.assertEqual(
+            City.objects.filter(
+                name="поселок Новый",
+                region=city.region,
+                country_code="RU",
+            ).count(),
+            1,
+        )
+        self.assertEqual(str(city.latitude), "56.123456")
+        self.assertEqual(str(city.longitude), "60.654321")
+
+    def test_updates_existing_city_and_supports_dry_run(self):
+        region = Region.objects.create(name="Республика Тест", country_code="RU")
+        City.objects.create(
+            name="село Старое",
+            region=region,
+            country_code="RU",
+            latitude="55.000000",
+            longitude="59.000000",
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            dataset_path = Path(temp_dir) / "allsettlements.xlsx"
+            self._write_dataset(
+                dataset_path,
+                [
+                    (
+                        "Населенный пункт",
+                        "село Старое",
+                        "Республика Тест",
+                        "село Старое",
+                        "56.111111",
+                        "60.222222",
+                    ),
+                    (
+                        "Населенный пункт",
+                        "деревня Без региона",
+                        "Неизвестная область",
+                        "деревня Без региона",
+                        "57.000000",
+                        "61.000000",
+                    ),
+                ],
+            )
+
+            output = StringIO()
+            call_command(
+                "import_allsettlements_locations",
+                file=str(dataset_path),
+                dry_run=True,
+                stdout=output,
+            )
+            city = City.objects.get(name="село Старое")
+            self.assertEqual(str(city.latitude), "55.000000")
+
+            call_command("import_allsettlements_locations", file=str(dataset_path))
+
+        city = City.objects.get(name="село Старое")
+        self.assertEqual(
+            City.objects.filter(
+                name="село Старое",
+                region=region,
+                country_code="RU",
+            ).count(),
+            1,
+        )
+        self.assertEqual(str(city.latitude), "56.111111")
+        self.assertEqual(str(city.longitude), "60.222222")
+        self.assertIn("skipped_without_region=1", output.getvalue())
+
+    def _write_dataset(self, path, rows):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "data"
+        worksheet.append(self.headers)
+        for row in rows:
+            worksheet.append(row)
+        workbook.save(path)
 
 
 class CommonGeoDataApiTests(APITestCase):
